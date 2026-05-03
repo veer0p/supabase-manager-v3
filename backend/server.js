@@ -65,6 +65,7 @@ async function initDB() {
             );
             CREATE INDEX IF NOT EXISTS idx_vps_metrics_node_time ON vps_metrics(node_id, recorded_at DESC);
             INSERT INTO config (id) VALUES (1) ON CONFLICT DO NOTHING;
+            ALTER TABLE vps_metrics ADD COLUMN IF NOT EXISTS cpu_cores INT DEFAULT 2;
         `);
         console.log('DB initialized');
     } catch (e) {

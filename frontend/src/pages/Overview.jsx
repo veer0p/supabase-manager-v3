@@ -43,23 +43,23 @@ function StatCard({ icon: Icon, label, value, sub, color = '#3ecf8e', animate = 
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -2, transition: { duration: 0.15 } }}
-      className="glass p-6 rounded-2xl border-gray-800 relative overflow-hidden group"
+      className="glass p-5 rounded-xl border border-white/5 relative overflow-hidden group shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)]"
     >
       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{ background: `radial-gradient(ellipse at 80% 20%, ${color}08 0%, transparent 70%)` }} />
+        style={{ background: `radial-gradient(ellipse at 80% 20%, ${color}15 0%, transparent 70%)` }} />
       <div className="flex items-start justify-between mb-4">
-        <div className="p-2.5 rounded-xl" style={{ background: `${color}15` }}>
-          <Icon size={20} style={{ color }} />
+        <div className="p-2 rounded border border-white/5 shadow-inner" style={{ background: `${color}10`, boxShadow: `inset 0 0 10px ${color}15` }}>
+          <Icon size={18} style={{ color }} />
         </div>
-        {animate && <span className="flex h-2 w-2"><span className="animate-ping absolute inline-flex h-2 w-2 rounded-full opacity-75" style={{ background: color }} /><span className="relative inline-flex rounded-full h-2 w-2" style={{ background: color }} /></span>}
+        {animate && <span className="flex h-2 w-2"><span className="animate-ping absolute inline-flex h-2 w-2 rounded-sm opacity-75" style={{ background: color }} /><span className="relative inline-flex rounded-sm h-2 w-2 shadow-[0_0_8px_currentColor]" style={{ background: color }} /></span>}
       </div>
-      <p className="text-gray-500 text-xs uppercase tracking-wider font-medium mb-1">{label}</p>
+      <p className="text-gray-500 text-[10px] font-orbitron uppercase tracking-widest font-bold mb-1">{label}</p>
       {loading ? (
-        <div className="h-8 w-16 bg-white/5 rounded-lg animate-pulse" />
+        <div className="h-8 w-16 bg-white/5 rounded animate-pulse" />
       ) : (
-        <p className="text-3xl font-bold text-white">{value}</p>
+        <p className="text-3xl font-bold font-orbitron text-white tracking-wider" style={{ textShadow: `0 0 10px ${color}20` }}>{value}</p>
       )}
-      {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
+      {sub && <p className="text-[10px] text-gray-500 mt-2 tracking-wide uppercase">{sub}</p>}
     </motion.div>
   );
 }
@@ -301,8 +301,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 const PeriodBtn = ({ label, active, onClick }) => (
   <button
     onClick={onClick}
-    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-      active ? 'bg-supa-green text-black' : 'text-gray-400 hover:text-white hover:bg-white/5'
+    className={`px-3 py-1 text-[10px] font-orbitron font-bold uppercase tracking-wider border-r border-white/5 last:border-0 transition-all ${
+      active ? 'bg-[#3ecf8e] text-black shadow-[0_0_10px_#3ecf8e80]' : 'text-gray-500 hover:text-white hover:bg-white/5'
     }`}
   >
     {label}
@@ -390,15 +390,15 @@ export default function Overview() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">System Overview</h1>
-          <p className="text-gray-500 text-sm mt-1">Real-time intelligence for your infrastructure.</p>
+          <h1 className="text-3xl font-bold font-orbitron text-white uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400">Telemetry Overview</h1>
+          <p className="text-gray-500 text-[10px] mt-2 font-orbitron uppercase tracking-widest border border-white/5 inline-block px-2 py-0.5 rounded bg-black/20">Real-time intelligence for your infrastructure.</p>
         </div>
         <div className="flex items-center gap-3">
           {lastUpdated && (
-            <span className="text-xs text-gray-600 flex items-center gap-1">
-              <RefreshCw size={10} className="animate-spin" style={{ animationDuration: '3s' }} />
+            <span className="text-[10px] text-gray-500 font-orbitron uppercase tracking-wider flex items-center gap-2 border border-white/5 px-2 py-1 rounded bg-black/20">
+              <RefreshCw size={10} className="animate-spin text-[#3ecf8e]" style={{ animationDuration: '3s' }} />
               {lastUpdated.toLocaleTimeString()}
             </span>
           )}
@@ -519,60 +519,63 @@ export default function Overview() {
       {/* Insights Panel */}
       {liveData && (
         <section>
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <Zap size={18} className="text-amber-400" /> Intelligent Insights
-          </h2>
+          <div className="flex items-center gap-3 mb-4">
+            <span className="w-1.5 h-6 bg-amber-500 rounded-r shadow-[0_0_8px_#f59e0b]" />
+            <h2 className="text-lg font-orbitron font-bold text-white tracking-widest uppercase flex items-center gap-2">
+              <Zap size={18} className="text-amber-400" /> Intelligent Insights
+            </h2>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {/* Top process */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border-gray-800 flex items-start gap-3">
-              <div className="p-2 bg-purple-500/10 rounded-lg"><Package size={16} className="text-purple-400" /></div>
+            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
+              <div className="p-2 border border-purple-500/20 bg-purple-500/10 rounded shadow-[inset_0_0_8px_rgba(168,85,247,0.2)]"><Package size={16} className="text-purple-400" /></div>
               <div>
-                <p className="text-xs text-gray-500 mb-0.5">Top Memory Consumer</p>
+                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Top Memory Consumer</p>
                 <p className="text-white font-mono font-bold">{liveData.top_process_name || '—'}</p>
-                <p className="text-xs text-gray-500">{liveData.top_process_ram_mb || 0} MB RAM</p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1"><span className="text-purple-400">{liveData.top_process_ram_mb || 0}</span> MB RAM</p>
               </div>
             </motion.div>
 
             {/* Uptime */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border-gray-800 flex items-start gap-3">
-              <div className="p-2 bg-green-500/10 rounded-lg"><Clock size={16} className="text-green-400" /></div>
+            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
+              <div className="p-2 border border-[#3ecf8e20] bg-[#3ecf8e10] rounded shadow-[inset_0_0_8px_rgba(62,207,142,0.2)]"><Clock size={16} className="text-[#3ecf8e]" /></div>
               <div>
-                <p className="text-xs text-gray-500 mb-0.5">Server Uptime</p>
-                <p className="text-white font-bold">{formatUptime(liveData.uptime_seconds || 0)}</p>
-                <p className="text-xs text-green-400">Stable</p>
+                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Server Uptime</p>
+                <p className="text-white font-mono font-bold tracking-wider">{formatUptime(liveData.uptime_seconds || 0)}</p>
+                <p className="text-[10px] text-[#3ecf8e] uppercase tracking-widest mt-1">Stable</p>
               </div>
             </motion.div>
 
             {/* Docker containers */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border-gray-800 flex items-start gap-3">
-              <div className="p-2 bg-blue-500/10 rounded-lg"><Database size={16} className="text-blue-400" /></div>
+            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
+              <div className="p-2 border border-blue-500/20 bg-blue-500/10 rounded shadow-[inset_0_0_8px_rgba(59,130,246,0.2)]"><Database size={16} className="text-blue-400" /></div>
               <div>
-                <p className="text-xs text-gray-500 mb-0.5">Docker Containers</p>
-                <p className="text-white font-bold">{liveData.docker_container_count || 0} running</p>
-                <p className="text-xs text-gray-500">{activeCount} managed instances</p>
+                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Docker Containers</p>
+                <p className="text-white font-mono font-bold"><span className="text-blue-400">{liveData.docker_container_count || 0}</span> running</p>
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">{activeCount} managed instances</p>
               </div>
             </motion.div>
 
             {/* 24h CPU peak */}
             {summary.peak_cpu && (
-              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border-gray-800 flex items-start gap-3">
-                <div className="p-2 bg-amber-500/10 rounded-lg"><TrendingUp size={16} className="text-amber-400" /></div>
+              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
+                <div className="p-2 border border-amber-500/20 bg-amber-500/10 rounded shadow-[inset_0_0_8px_rgba(245,158,11,0.2)]"><TrendingUp size={16} className="text-amber-400" /></div>
                 <div>
-                  <p className="text-xs text-gray-500 mb-0.5">24h CPU Peak</p>
-                  <p className="text-white font-bold">{fmt(summary.peak_cpu)}%</p>
-                  <p className="text-xs text-gray-500">avg: {fmt(summary.avg_cpu)}%</p>
+                  <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">24h CPU Peak</p>
+                  <p className="text-white font-mono font-bold tracking-wider">{fmt(summary.peak_cpu)}%</p>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">avg: <span className="text-amber-400">{fmt(summary.avg_cpu)}%</span></p>
                 </div>
               </motion.div>
             )}
 
             {/* 24h RAM peak */}
             {summary.peak_ram && (
-              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border-gray-800 flex items-start gap-3">
-                <div className="p-2 bg-red-500/10 rounded-lg"><TrendingUp size={16} className="text-red-400" /></div>
+              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
+                <div className="p-2 border border-red-500/20 bg-red-500/10 rounded shadow-[inset_0_0_8px_rgba(239,68,68,0.2)]"><TrendingUp size={16} className="text-red-400" /></div>
                 <div>
-                  <p className="text-xs text-gray-500 mb-0.5">24h RAM Peak</p>
-                  <p className="text-white font-bold">{fmt(summary.peak_ram)}%</p>
-                  <p className="text-xs text-gray-500">avg: {fmt(summary.avg_ram)}%</p>
+                  <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">24h RAM Peak</p>
+                  <p className="text-white font-mono font-bold tracking-wider">{fmt(summary.peak_ram)}%</p>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">avg: <span className="text-red-400">{fmt(summary.avg_ram)}%</span></p>
                 </div>
               </motion.div>
             )}
@@ -581,15 +584,18 @@ export default function Overview() {
       )}
 
       {/* Historical Trend */}
-      <section className="glass p-6 rounded-2xl border-gray-800">
+      <section className="glass p-6 rounded-xl border border-white/5 shadow-inner">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Historical Trend</h2>
-            <p className="text-gray-500 text-xs mt-0.5">
-              {history.length === 0 ? 'Collecting data — updates every 30s' : `${history.length} data points`}
-            </p>
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-8 bg-blue-500 rounded-r shadow-[0_0_8px_#3b82f6]" />
+            <div>
+              <h2 className="text-lg font-orbitron font-bold tracking-widest text-white uppercase">Historical Trend</h2>
+              <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-1">
+                {history.length === 0 ? 'Collecting data — updates every 30s' : `${history.length} telemetry points logged`}
+              </p>
+            </div>
           </div>
-          <div className="flex gap-1 bg-white/5 p-1 rounded-xl">
+          <div className="flex bg-[#0a0a0c] p-1 rounded border border-white/10 shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)]">
             {['1h', '6h', '24h', '7d', '30d'].map(p => (
               <PeriodBtn key={p} label={p} active={period === p} onClick={() => setPeriod(p)} />
             ))}
