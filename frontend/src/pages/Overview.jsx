@@ -64,51 +64,20 @@ function StatCard({ icon: Icon, label, value, sub, color = '#3ecf8e', animate = 
   );
 }
 
-// Disc Brake Loader
-function DiscBrakeLoader() {
-  return (
-    <div className="flex flex-col items-center justify-center space-y-6">
-      <motion.svg width="80" height="80" viewBox="0 0 100 100" animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}>
-        <circle cx="50" cy="50" r="45" fill="none" stroke="#222" strokeWidth="8" />
-        <circle cx="50" cy="50" r="45" fill="none" stroke="#444" strokeWidth="2" strokeDasharray="10 6" />
-        <circle cx="50" cy="50" r="24" fill="none" stroke="#111" strokeWidth="6" />
-        <circle cx="50" cy="50" r="14" fill="#111" />
-        {[0, 60, 120, 180, 240, 300].map(a => (
-          <line key={a} x1="50" y1="18" x2="50" y2="35" stroke="#111" strokeWidth="3" transform={`rotate(${a} 50 50)`} strokeLinecap="round" />
-        ))}
-      </motion.svg>
-      <div className="text-[10px] text-gray-500 font-orbitron uppercase tracking-widest animate-pulse flex items-center gap-2">
-        <span className="w-1.5 h-1.5 bg-[#3ecf8e] rounded-full shadow-[0_0_5px_#3ecf8e]" />
-        Initializing Telemetry...
-      </div>
-    </div>
-  );
-}
+
 
 // Tachometer for CPU (RPM style)
 function Tachometer({ value, color }) {
   const [displayValue, setDisplayValue] = useState(0);
-  const isInitial = useRef(true);
   const currentVal = useRef(0);
   
   useEffect(() => {
-    if (isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, value], {
-        duration: 3,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    } else {
-      const controls = animate(currentVal.current, value, {
-        duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    }
+    const controls = animate(currentVal.current, value, {
+      duration: 1.2,
+      ease: "easeOut",
+      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+    });
+    return controls.stop;
   }, [value]);
 
   const R = 54; const cx = 70; const cy = 70;
@@ -162,27 +131,15 @@ function Tachometer({ value, color }) {
 // Fuel Gauge for RAM (Segmented)
 function FuelGauge({ percent, used, total, color }) {
   const [displayValue, setDisplayValue] = useState(0);
-  const isInitial = useRef(true);
   const currentVal = useRef(0);
   
   useEffect(() => {
-    if (isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, percent], {
-        duration: 3,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    } else {
-      const controls = animate(currentVal.current, percent, {
-        duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    }
+    const controls = animate(currentVal.current, percent, {
+      duration: 1.2,
+      ease: "easeOut",
+      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+    });
+    return controls.stop;
   }, [percent]);
 
   const segments = 16;
@@ -222,27 +179,15 @@ function FuelGauge({ percent, used, total, color }) {
 // Odometer for Disk Space
 function Odometer({ usedGb, totalGb, color }) {
   const [displayUsed, setDisplayUsed] = useState(0);
-  const isInitial = useRef(true);
   const currentVal = useRef(0);
   
   useEffect(() => {
-    if (isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(0, [0, totalGb, 0, usedGb], {
-        duration: 3,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    } else {
-      const controls = animate(currentVal.current, usedGb, {
-        duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    }
+    const controls = animate(currentVal.current, usedGb, {
+      duration: 1.2,
+      ease: "easeOut",
+      onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
+    });
+    return controls.stop;
   }, [usedGb, totalGb]);
 
   const padStr = Math.round(displayUsed).toString().padStart(6, '0');
@@ -281,27 +226,15 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   const targetPct = Math.min(pressure, 100);
 
   const [displayValue, setDisplayValue] = useState(0);
-  const isInitial = useRef(true);
   const currentVal = useRef(0);
   
   useEffect(() => {
-    if (isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, targetPct], {
-        duration: 3,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    } else {
-      const controls = animate(currentVal.current, targetPct, {
-        duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-      });
-      return () => controls.stop();
-    }
+    const controls = animate(currentVal.current, targetPct, {
+      duration: 1.2,
+      ease: "easeOut",
+      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+    });
+    return controls.stop;
   }, [targetPct]);
 
   let status, color, glow;
@@ -465,6 +398,28 @@ export default function Overview() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
+      {/* Full Screen Cyberpunk Loader Overlay */}
+      {!liveData && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#050505]/80 backdrop-blur-md">
+          <div className="relative flex items-center justify-center w-64 h-64 mb-8">
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 8, ease: "linear" }} className="absolute inset-0 rounded-full border border-white/10 border-t-[#3ecf8e] opacity-80 shadow-[0_0_15px_#3ecf8e]" />
+            <motion.div animate={{ scale: [0.95, 1.05, 0.95], opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }} className="absolute inset-8 rounded-full border border-dashed border-[#3ecf8e]/50" />
+            <div className="absolute inset-16 bg-[radial-gradient(ellipse_at_center,_#3ecf8e33_0%,_transparent_70%)] rounded-full animate-pulse" />
+            <Activity size={40} className="text-[#3ecf8e] z-10" />
+          </div>
+          <h2 className="font-orbitron text-2xl font-bold tracking-[0.3em] text-white uppercase drop-shadow-[0_0_10px_rgba(62,207,142,0.5)]">Apex Telemetry</h2>
+          <div className="flex flex-col items-center mt-6 gap-2">
+            <div className="flex items-center gap-3">
+              <span className="w-2 h-2 bg-[#3ecf8e] rounded-full shadow-[0_0_8px_#3ecf8e] animate-ping" />
+              <span className="text-xs font-mono text-[#3ecf8e] tracking-widest uppercase">Establishing Secure Uplink</span>
+            </div>
+            <div className="w-48 h-1 bg-white/10 rounded overflow-hidden mt-2">
+              <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }} className="w-full h-full bg-[#3ecf8e] shadow-[0_0_10px_#3ecf8e]" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
@@ -516,16 +471,15 @@ export default function Overview() {
       </div>
 
       {/* Live Metrics 2x2 Grid */}
-      {liveData ? (
-        <section>
-          <div className="flex items-center gap-3 mb-4">
-            <span className="w-1.5 h-6 bg-[#3ecf8e] rounded-r shadow-[0_0_8px_#3ecf8e]" />
-            <h2 className="text-lg font-orbitron font-bold text-white tracking-widest uppercase flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-supa-green animate-pulse inline-block" />
-              Live Metrics — {node?.name}
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <span className="w-1.5 h-6 bg-[#3ecf8e] rounded-r shadow-[0_0_8px_#3ecf8e]" />
+          <h2 className="text-lg font-orbitron font-bold text-white tracking-widest uppercase flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-supa-green animate-pulse inline-block" />
+            Live Metrics — {node?.name || "Connecting"}
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
             {/* CPU (Tachometer) */}
             <motion.div whileHover={{ y: -2 }} className={`glass p-5 rounded-2xl border ${cpuThresh.bg} relative overflow-hidden`}>
@@ -539,7 +493,7 @@ export default function Overview() {
                   {cpuThresh.label}
                 </span>
               </div>
-              <Tachometer value={liveData.cpu || 0} color={cpuThresh.color} />
+              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} />
             </motion.div>
 
             {/* RAM (Fuel Gauge) */}
@@ -551,13 +505,13 @@ export default function Overview() {
                   <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">RAM FUEL</span>
                 </div>
                 <span className="text-[10px] font-orbitron px-2 py-0.5 rounded border border-white/10" style={{ color: ramThresh.color, background: `${ramThresh.color}15` }}>
-                  {fmt(liveData.ram_percent)}%
+                  {fmt(liveData?.ram_percent || 0)}%
                 </span>
               </div>
               <FuelGauge 
-                percent={liveData.ram_percent || 0} 
-                used={liveData.ram_used_mb} 
-                total={liveData.ram_total_mb} 
+                percent={liveData?.ram_percent || 0} 
+                used={liveData?.ram_used_mb || 0} 
+                total={liveData?.ram_total_mb || 1024} 
                 color={ramThresh.color} 
               />
             </motion.div>
@@ -573,7 +527,7 @@ export default function Overview() {
                   {diskThresh.label}
                 </span>
               </div>
-              <Odometer usedGb={liveData.disk_used_gb || 0} totalGb={Math.round(liveData.disk_total_gb) || 0} color={diskThresh.color} />
+              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} />
             </motion.div>
 
             {/* System Pressure (Turbo Boost) */}
@@ -582,24 +536,18 @@ export default function Overview() {
               <div className="flex items-center gap-2 mb-2 self-start">
                 <Activity size={18} className="text-purple-400" />
                 <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">TURBO BOOST</span>
-                <span className="text-[9px] text-gray-500 font-orbitron ml-1 mt-0.5">[{liveData.cpu_cores || 2} CORES]</span>
+                <span className="text-[9px] text-gray-500 font-orbitron ml-1 mt-0.5">[{liveData?.cpu_cores || 2} CORES]</span>
               </div>
               <PressureGauge
-                load1m={liveData.load_avg_1m || 0}
-                load5m={liveData.load_avg_5m || 0}
-                load15m={liveData.load_avg_15m || 0}
-                cpuCores={liveData.cpu_cores || 2}
+                load1m={liveData?.load_avg_1m || 0}
+                load5m={liveData?.load_avg_5m || 0}
+                load15m={liveData?.load_avg_15m || 0}
+                cpuCores={liveData?.cpu_cores || 2}
               />
             </motion.div>
 
           </div>
         </section>
-      ) : (
-        <section className="h-[300px] flex flex-col items-center justify-center glass rounded-xl border border-white/5 relative overflow-hidden shadow-inner">
-          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_#3ecf8e08_0%,_transparent_60%)]" />
-          <DiscBrakeLoader />
-        </section>
-      )}
 
       {/* Insights Panel */}
       {liveData && (
