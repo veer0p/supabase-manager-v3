@@ -94,7 +94,7 @@ function Tachometer({ value, color }) {
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false;
-      const controls = animate([0, 100, 0, value], {
+      const controls = animate(0, [0, 100, 0, value], {
         duration: 3,
         times: [0, 0.4, 0.7, 1],
         ease: "easeInOut",
@@ -168,7 +168,7 @@ function FuelGauge({ percent, used, total, color }) {
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false;
-      const controls = animate([0, 100, 0, percent], {
+      const controls = animate(0, [0, 100, 0, percent], {
         duration: 3,
         times: [0, 0.4, 0.7, 1],
         ease: "easeInOut",
@@ -228,7 +228,7 @@ function Odometer({ usedGb, totalGb, color }) {
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false;
-      const controls = animate([0, totalGb, 0, usedGb], {
+      const controls = animate(0, [0, totalGb, 0, usedGb], {
         duration: 3,
         times: [0, 0.4, 0.7, 1],
         ease: "easeInOut",
@@ -287,7 +287,7 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false;
-      const controls = animate([0, 100, 0, targetPct], {
+      const controls = animate(0, [0, 100, 0, targetPct], {
         duration: 3,
         times: [0, 0.4, 0.7, 1],
         ease: "easeInOut",
