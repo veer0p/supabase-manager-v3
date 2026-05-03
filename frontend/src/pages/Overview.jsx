@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, animate } from 'framer-motion';
 import {
   Server, Database, AlertTriangle, Activity, Cpu, HardDrive,
   MemoryStick, Zap, TrendingUp, TrendingDown, Clock, Package,
@@ -69,9 +69,12 @@ function Tachometer({ value, color }) {
   const [displayValue, setDisplayValue] = useState(0);
   
   useEffect(() => {
-    setDisplayValue(100);
-    const t1 = setTimeout(() => setDisplayValue(value), 800);
-    return () => clearTimeout(t1);
+    const controls = animate(100, value, {
+      duration: 1.8,
+      ease: [0.34, 1.56, 0.64, 1],
+      onUpdate: (v) => setDisplayValue(v)
+    });
+    return () => controls.stop();
   }, [value]);
 
   const R = 54; const cx = 70; const cy = 70;
@@ -107,13 +110,13 @@ function Tachometer({ value, color }) {
           return <line key={i} x1={tnx} y1={tny} x2={tox} y2={toy} stroke={isRed ? '#ef4444' : '#555'} strokeWidth="2" />
         })}
 
-        {fillPath && <path d={fillPath} fill="none" stroke={displayValue > 85 ? '#ef4444' : color} strokeWidth="8" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${displayValue > 85 ? '#ef4444' : color})`, transition: 'd 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)' }} />}
+        {fillPath && <path d={fillPath} fill="none" stroke={displayValue > 85 ? '#ef4444' : color} strokeWidth="8" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${displayValue > 85 ? '#ef4444' : color})` }} />}
         
-        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))', transition: 'all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)' }} />
-        <circle cx={cx} cy={cy} r="5" fill="#222" stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2" style={{ transition: 'stroke 0.8s' }} />
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))' }} />
+        <circle cx={cx} cy={cy} r="5" fill="#222" stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2" />
       </svg>
       <div className="absolute top-[85px] flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: displayValue > 85 ? '#ef4444' : '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.8)', transition: 'color 0.8s' }}>
+        <span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: displayValue > 85 ? '#ef4444' : '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
           {Math.round(displayValue)}
         </span>
         <span className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: displayValue > 85 ? '#ef4444' : color, textShadow: `0 0 8px ${color}80`, transition: 'color 0.8s' }}>RPM x100</span>
@@ -127,9 +130,12 @@ function FuelGauge({ percent, used, total, color }) {
   const [displayValue, setDisplayValue] = useState(0);
   
   useEffect(() => {
-    setDisplayValue(100);
-    const t1 = setTimeout(() => setDisplayValue(percent), 600);
-    return () => clearTimeout(t1);
+    const controls = animate(100, percent, {
+      duration: 1.8,
+      ease: [0.34, 1.56, 0.64, 1],
+      onUpdate: (v) => setDisplayValue(v)
+    });
+    return () => controls.stop();
   }, [percent]);
 
   const segments = 16;
@@ -223,9 +229,12 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   const [displayValue, setDisplayValue] = useState(0);
   
   useEffect(() => {
-    setDisplayValue(100);
-    const t1 = setTimeout(() => setDisplayValue(targetPct), 900);
-    return () => clearTimeout(t1);
+    const controls = animate(100, targetPct, {
+      duration: 1.8,
+      ease: [0.34, 1.56, 0.64, 1],
+      onUpdate: (v) => setDisplayValue(v)
+    });
+    return () => controls.stop();
   }, [targetPct]);
 
   let status, color, glow;
@@ -271,8 +280,8 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
         <text x="108" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">100%</text>
       </svg>
       <div className="flex items-center gap-2 -mt-2">
-        <span className="text-2xl font-bold font-orbitron" style={{ color, transition: 'color 0.8s' }}>{Math.round(displayValue)}%</span>
-        <span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: `${color}40`, transition: 'all 0.8s' }}>{status}</span>
+        <span className="text-2xl font-bold font-orbitron" style={{ color }}>{Math.round(displayValue)}%</span>
+        <span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: `${color}40` }}>{status}</span>
         {trend === 'up'   && <span className="text-red-400 font-bold text-sm" title="Load increasing">↑</span>}
         {trend === 'down' && <span className="text-green-400 font-bold text-sm" title="Load decreasing">↓</span>}
         {trend === 'flat' && <span className="text-gray-500 text-sm" title="Load stable">→</span>}
