@@ -357,39 +357,25 @@ app.get('/api/logs/:id', (req, res) => res.json({ logs: global.deploymentLogs[re
 // --- LIVE STATS ---
 app.get('/api/stats/:nodeId', async (req, res) => {
     try {
-        const parts0 = [
-          'CPU=$(top -bn2 | grep "Cpu(s)" | tail -1 | sed \'s/.*, *\\([0-9.]*\\)%* id.*/\\1/\' | awk \'{print 100 - $1}\')',
-          'RAM_USED=$(free -m | awk \'NR==2{print $3}\')',
-          'RAM_TOTAL=$(free -m | awk \'NR==2{print $2}\')',
-          'RAM_PCT=$(free -m | awk \'NR==2{printf "%.1f", $3*100/$2}\')',
-          'DISK_PCT=$(df / | awk \'NR==2{print $5}\' | tr -d \'%\')',
-          'DISK_USED=$(df -BG / | awk \'NR==2{print $3}\' | tr -d \'G\')',
-          'DISK_TOTAL=$(df -BG / | awk \'NR==2{print $2}\' | tr -d \'G\')',
-          'LOAD=$(cat /proc/loadavg | awk \'{print $1, $2, $3}\')',
-          'UPTIME=$(cat /proc/uptime | awk \'{print int($1)}\')',
-          'TOP_PROC=$(ps aux --sort=-%mem | awk \'NR==2{print $11}\' | xargs -I{} basename {})',
-          'TOP_RAM=$(ps aux --sort=-%mem | awk \'NR==2{printf "%d", $6/1024}\')',
-          'DOCKER_COUNT=$(docker ps -q 2>/dev/null | wc -l)',
-          'echo "$CPU|$RAM_USED|$RAM_TOTAL|$RAM_PCT|$DISK_PCT|$DISK_USED|$DISK_TOTAL|$LOAD|$UPTIME|$TOP_PROC|$TOP_RAM|$DOCKER_COUNT"',
-        ].join('\n');
-        const result = await runSSH(req.params.nodeId, parts0);
-        const parts = result.stdout.trim().split('|');
-        const [la1, la5, la15] = (parts[7] || '0 0 0').split(' ');
+        const result = await runSSH(req.params.nodeId, 'python3 /opt/supabase-manager/metrics.py');
+        const lines = result.stdout.trim().split('\n').filter(l => l.includes('|'));
+        const lastLine = lines[lines.length - 1] || '';
+        const p = lastLine.split('|');
         const data = {
-            cpu: parseFloat(parts[0]) || 0,
-            ram_used_mb: parseInt(parts[1]) || 0,
-            ram_total_mb: parseInt(parts[2]) || 0,
-            ram_percent: parseFloat(parts[3]) || 0,
-            disk_percent: parseFloat(parts[4]) || 0,
-            disk_used_gb: parseFloat(parts[5]) || 0,
-            disk_total_gb: parseFloat(parts[6]) || 0,
-            load_avg_1m: parseFloat(la1) || 0,
-            load_avg_5m: parseFloat(la5) || 0,
-            load_avg_15m: parseFloat(la15) || 0,
-            uptime_seconds: parseInt(parts[8]) || 0,
-            top_process_name: parts[9] || '',
-            top_process_ram_mb: parseInt(parts[10]) || 0,
-            docker_container_count: parseInt(parts[11]) || 0,
+            cpu:                parseFloat(p[0])  || 0,
+            ram_used_mb:        parseInt(p[1])    || 0,
+            ram_total_mb:       parseInt(p[2])    || 0,
+            ram_percent:        parseFloat(p[3])  || 0,
+            disk_percent:       parseFloat(p[4])  || 0,
+            disk_used_gb:       parseFloat(p[5])  || 0,
+            disk_total_gb:      parseFloat(p[6])  || 0,
+            load_avg_1m:        parseFloat(p[7])  || 0,
+            load_avg_5m:        parseFloat(p[8])  || 0,
+            load_avg_15m:       parseFloat(p[9])  || 0,
+            uptime_seconds:     parseInt(p[10])   || 0,
+            top_process_name:   p[11] || '',
+            top_process_ram_mb: parseInt(p[12])   || 0,
+            docker_container_count: parseInt(p[13]) || 0,
         };
         res.json(data);
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -399,7 +385,7 @@ app.get('/api/stats/:nodeId', async (req, res) => {
 app.get('/api/metrics/:nodeId', async (req, res) => {
     if (!useDB) return res.json([]);
     const period = req.query.period || '1h';
-    const intervals = { '1h': '1 hour', '6h': '6 hours', '24h': '24 hours', '7d': '7 days' };
+    const intervals = { '1h': '1 hour', '6h': '6 hours', '24h': '24 hours', '7d': '7 days', '30d': '30 days' };
     const interval = intervals[period] || '1 hour';
     try {
         const rows = await query(`
@@ -487,21 +473,7 @@ app.post('/api/files/upload/:nodeId', upload.single('file'), async (req, res) =>
 });
 
 // --- METRICS POLLER (30-second background job) ---
-const METRICS_SCRIPT = [
-  'CPU=$(top -bn2 | grep "Cpu(s)" | tail -1 | sed \'s/.*, *\\([0-9.]*\\)%* id.*/\\1/\' | awk \'{print 100 - $1}\')',
-  'RAM_USED=$(free -m | awk \'NR==2{print $3}\')',
-  'RAM_TOTAL=$(free -m | awk \'NR==2{print $2}\')',
-  'RAM_PCT=$(free -m | awk \'NR==2{printf "%.1f", $3*100/$2}\')',
-  'DISK_PCT=$(df / | awk \'NR==2{print $5}\' | tr -d \'%\')',
-  'DISK_USED=$(df -BG / | awk \'NR==2{print $3}\' | tr -d \'G\')',
-  'DISK_TOTAL=$(df -BG / | awk \'NR==2{print $2}\' | tr -d \'G\')',
-  'LOAD=$(cat /proc/loadavg | awk \'{print $1, $2, $3}\')',
-  'UPTIME=$(cat /proc/uptime | awk \'{print int($1)}\')',
-  'TOP_PROC=$(ps aux --sort=-%mem | awk \'NR==2{print $11}\' | xargs -I{} basename {})',
-  'TOP_RAM=$(ps aux --sort=-%mem | awk \'NR==2{printf "%d", $6/1024}\')',
-  'DOCKER_COUNT=$(docker ps -q 2>/dev/null | wc -l)',
-  'echo "$CPU|$RAM_USED|$RAM_TOTAL|$RAM_PCT|$DISK_PCT|$DISK_USED|$DISK_TOTAL|$LOAD|$UPTIME|$TOP_PROC|$TOP_RAM|$DOCKER_COUNT"',
-].join('\n');
+const METRICS_SCRIPT = 'python3 /opt/supabase-manager/metrics.py';
 
 async function collectNodeMetrics(node) {
     try {
@@ -509,9 +481,10 @@ async function collectNodeMetrics(node) {
         await ssh.connect({ host: node.ip, username: 'root', password: node.password, readyTimeout: 10000 });
         const result = await ssh.execCommand(METRICS_SCRIPT, { cwd: '/root' });
         ssh.dispose();
-        const parts = result.stdout.trim().split('|');
-        if (parts.length < 10) return;
-        const [la1, la5, la15] = (parts[7] || '0 0 0').split(' ');
+        const lines = result.stdout.trim().split('\n').filter(l => l.includes('|'));
+        const lastLine = lines[lines.length - 1] || '';
+        const p = lastLine.split('|');
+        if (p.length < 10) return;
         await query(`
             INSERT INTO vps_metrics 
             (node_id, cpu_percent, ram_used_mb, ram_total_mb, ram_percent,
@@ -521,11 +494,11 @@ async function collectNodeMetrics(node) {
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         `, [
             node.id,
-            parseFloat(parts[0]) || 0,
-            parseInt(parts[1]) || 0, parseInt(parts[2]) || 0, parseFloat(parts[3]) || 0,
-            parseFloat(parts[4]) || 0, parseFloat(parts[5]) || 0, parseFloat(parts[6]) || 0,
-            parseFloat(la1) || 0, parseFloat(la5) || 0, parseFloat(la15) || 0,
-            parseInt(parts[8]) || 0, parts[9] || '', parseInt(parts[10]) || 0, parseInt(parts[11]) || 0,
+            parseFloat(p[0]) || 0,
+            parseInt(p[1]) || 0, parseInt(p[2]) || 0, parseFloat(p[3]) || 0,
+            parseFloat(p[4]) || 0, parseFloat(p[5]) || 0, parseFloat(p[6]) || 0,
+            parseFloat(p[7]) || 0, parseFloat(p[8]) || 0, parseFloat(p[9]) || 0,
+            parseInt(p[10]) || 0, p[11] || '', parseInt(p[12]) || 0, parseInt(p[13]) || 0,
         ]);
     } catch(e) {
         // Silently fail — node may be temporarily unreachable

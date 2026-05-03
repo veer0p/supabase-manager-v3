@@ -408,7 +408,7 @@ export default function Overview() {
             </p>
           </div>
           <div className="flex gap-1 bg-white/5 p-1 rounded-xl">
-            {['1h', '6h', '24h', '7d'].map(p => (
+            {['1h', '6h', '24h', '7d', '30d'].map(p => (
               <PeriodBtn key={p} label={p} active={period === p} onClick={() => setPeriod(p)} />
             ))}
           </div>

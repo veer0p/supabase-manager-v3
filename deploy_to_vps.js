@@ -27,7 +27,8 @@ async function deploy() {
     await ssh.putFiles([
         { local: path.join(__dirname, 'backend/server.js'), remote: '/opt/supabase-manager/backend/server.js' },
         { local: path.join(__dirname, 'backend/package.json'), remote: '/opt/supabase-manager/backend/package.json' },
-        { local: path.join(__dirname, 'backend/ecosystem.config.js'), remote: '/opt/supabase-manager/backend/ecosystem.config.js' }
+        { local: path.join(__dirname, 'backend/ecosystem.config.js'), remote: '/opt/supabase-manager/backend/ecosystem.config.js' },
+        { local: path.join(__dirname, 'backend/metrics.py'), remote: '/opt/supabase-manager/metrics.py' }
     ]);
 
     console.log("Uploading frontend dist...");
