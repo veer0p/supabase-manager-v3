@@ -7,16 +7,24 @@
 }
 
 body {
-  background-color: #121212;
+  background-color: #0a0a0c;
+  background-image: radial-gradient(circle at 50% -20%, #1a1a2e 0%, #0a0a0c 60%);
   color: #f3f4f6;
+  font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.font-orbitron {
+  font-family: 'Orbitron', monospace;
 }
 
 .glass {
-    background: rgba(45, 45, 45, 0.6);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(20, 20, 24, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
 }
 
 .spinner {

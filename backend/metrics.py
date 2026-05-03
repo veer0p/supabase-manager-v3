@@ -52,5 +52,6 @@ except Exception:
 cpu = cpu_pct()
 rm, rt, rp = ram()
 du, dt, dp = disk()
+cores = os.cpu_count() or 2
 
-print(f"{cpu}|{rm}|{rt}|{rp}|{dp}|{du}|{dt}|{la[0]}|{la[1]}|{la[2]}|{up}|{tp}|{tr}|{dc}")
+print(f"{cpu}|{rm}|{rt}|{rp}|{dp}|{du}|{dt}|{la[0]}|{la[1]}|{la[2]}|{up}|{tp}|{tr}|{dc}|{cores}")

@@ -60,7 +60,8 @@ async function initDB() {
                 uptime_seconds BIGINT DEFAULT 0,
                 top_process_name TEXT DEFAULT '',
                 top_process_ram_mb BIGINT DEFAULT 0,
-                docker_container_count INT DEFAULT 0
+                docker_container_count INT DEFAULT 0,
+                cpu_cores INT DEFAULT 2
             );
             CREATE INDEX IF NOT EXISTS idx_vps_metrics_node_time ON vps_metrics(node_id, recorded_at DESC);
             INSERT INTO config (id) VALUES (1) ON CONFLICT DO NOTHING;
@@ -372,6 +373,7 @@ function parseMetricsRow(row) {
         top_process_name:   row.top_process_name                || '',
         top_process_ram_mb: parseInt(row.top_process_ram_mb)   || 0,
         docker_container_count: parseInt(row.docker_container_count) || 0,
+        cpu_cores:          parseInt(row.cpu_cores)             || 2,
         source: 'db',
     };
 }
@@ -394,6 +396,7 @@ function parsePipeOutput(stdout) {
         top_process_name:   p[11]             || '',
         top_process_ram_mb: parseInt(p[12])   || 0,
         docker_container_count: parseInt(p[13]) || 0,
+        cpu_cores:          parseInt(p[14])   || 2,
         source: 'ssh',
     };
 }
@@ -440,7 +443,7 @@ app.get('/api/metrics/:nodeId', async (req, res) => {
         const rows = await query(`
             SELECT recorded_at, cpu_percent, ram_percent, disk_percent,
                    load_avg_1m, load_avg_5m, load_avg_15m,
-                   ram_used_mb, ram_total_mb, docker_container_count
+                   ram_used_mb, ram_total_mb, docker_container_count, cpu_cores
             FROM vps_metrics
             WHERE node_id = $1 AND recorded_at > NOW() - INTERVAL '${interval}'
             ORDER BY recorded_at ASC
@@ -539,8 +542,8 @@ async function collectNodeMetrics(node) {
             (node_id, cpu_percent, ram_used_mb, ram_total_mb, ram_percent,
              disk_percent, disk_used_gb, disk_total_gb,
              load_avg_1m, load_avg_5m, load_avg_15m, uptime_seconds,
-             top_process_name, top_process_ram_mb, docker_container_count)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+             top_process_name, top_process_ram_mb, docker_container_count, cpu_cores)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         `, [
             node.id,
             parseFloat(p[0]) || 0,
@@ -548,6 +551,7 @@ async function collectNodeMetrics(node) {
             parseFloat(p[4]) || 0, parseFloat(p[5]) || 0, parseFloat(p[6]) || 0,
             parseFloat(p[7]) || 0, parseFloat(p[8]) || 0, parseFloat(p[9]) || 0,
             parseInt(p[10]) || 0, p[11] || '', parseInt(p[12]) || 0, parseInt(p[13]) || 0,
+            parseInt(p[14]) || 2
         ]);
     } catch(e) {
         // Silently fail — node may be temporarily unreachable
