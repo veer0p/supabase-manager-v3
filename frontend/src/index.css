@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+@theme {
+  --color-supa-dark: #1c1c1c;
+  --color-supa-green: #3ecf8e;
+  --color-supa-greenHover: #24b47e;
+}
+
+body {
+  background-color: #121212;
+  color: #f3f4f6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.glass {
+    background: rgba(45, 45, 45, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spinner {
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-left-color: #3ecf8e;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin { 
+    0% { transform: rotate(0deg); } 
+    100% { transform: rotate(360deg); } 
+}

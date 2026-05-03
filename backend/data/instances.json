@@ -1,0 +1,10 @@
+{
+  "test": {
+    "nodeId": "306dcf92-b417-4660-95fc-b8f6add9f666",
+    "domain": "test.veer-vps.duckdns.org",
+    "studio_domain": "test-studio.veer-vps.duckdns.org",
+    "password": "IQWmUVmDZwQi",
+    "pgPassword": "nL4KGW67dwh5",
+    "status": "error"
+  }
+}
