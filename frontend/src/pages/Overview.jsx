@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence, animate } from 'framer-motion';
+import { motion, AnimatePresence, animate, useMotionValue, useTransform, useAnimationFrame } from 'framer-motion';
 import {
   Server, Database, AlertTriangle, Activity, Cpu, HardDrive,
   MemoryStick, Zap, TrendingUp, TrendingDown, Clock, Package,
@@ -21,9 +21,151 @@ function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  if (d > 0) return `${d}d ${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// Physics-driven Disc Brake Loader
+function DiscBrakeLoader({ onReadyToExit, dataReady }) {
+  const rotation = useMotionValue(0);
+  const velocity = useMotionValue(8); // Reduced top speed for smoothness
+  const caliperX = useMotionValue(0); // Explicit motion value for the caliper
+  const [phase, setPhase] = useState('constant'); 
+  const dataReadyRef = useRef(dataReady);
+  
+  useEffect(() => {
+    dataReadyRef.current = dataReady;
+  }, [dataReady]);
+  
+  // High-performance rotation update
+  useAnimationFrame((_, delta) => {
+    rotation.set(rotation.get() + (velocity.get() * (delta / 16.67)));
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    const runLoop = async () => {
+      // First run starts at constant speed
+      while (mounted) {
+        // Phase 1: High Speed Run (Constant)
+        setPhase('constant');
+        await new Promise(r => setTimeout(r, 800));
+        
+        // Phase 2: The Brake Clamp (Braking)
+        setPhase('braking');
+        animate(caliperX, -2, { duration: 0.15 }); // Fast clamp action
+        await animate(velocity, 0, { duration: 1.2, ease: [0.22, 1, 0.36, 1] });
+        
+        setPhase('stopped');
+        animate(caliperX, 0, { duration: 0.3, ease: "easeOut" }); // Smooth release
+        if (dataReadyRef.current) {
+          setTimeout(onReadyToExit, 400);
+          break;
+        }
+        
+        await new Promise(r => setTimeout(r, 800));
+
+        // Phase 3: Spin Up (Acceleration) for next loop
+        setPhase('accelerating');
+        await animate(velocity, 8, { duration: 1.5, ease: "easeIn" });
+      }
+    };
+    runLoop();
+    return () => { mounted = false; };
+  }, [onReadyToExit]); // Removed dataReady from dependencies to prevent loop restart
+
+  const heatOpacity = useTransform(velocity, [0, 15, 25], [0.1, 0.3, 0.6]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/60 backdrop-blur-2xl overflow-hidden">
+      <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_#ffffff11_0%,_transparent_70%)]" />
+      <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] rounded-full bg-white/5 blur-[120px] pointer-events-none" />
+      <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] rounded-full bg-white/5 blur-[120px] pointer-events-none" />
+      
+      <div className="relative w-96 h-96 flex items-center justify-center">
+        {/* Dynamic Heat Glow */}
+        <motion.div
+          style={{ opacity: heatOpacity, scale: useTransform(velocity, [0, 25], [0.8, 1.2]) }}
+          className="absolute w-64 h-64 rounded-full bg-red-600/40 blur-[60px]"
+        />
+
+        {/* The Spinning Rotor */}
+        <motion.div 
+          style={{ rotate: rotation, willChange: "transform", translateZ: 0 }}
+          className="relative z-10"
+        >
+          <svg width="280" height="280" viewBox="0 0 240 240">
+            <defs>
+              <radialGradient id="rotorGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#1a1a1a" />
+                <stop offset="80%" stopColor="#2a2a2a" />
+                <stop offset="100%" stopColor="#0a0a0a" />
+              </radialGradient>
+            </defs>
+            <circle cx="120" cy="120" r="105" fill="url(#rotorGrad)" stroke="#333" strokeWidth="1" />
+            {[...Array(18)].map((_, i) => (
+              <rect key={i} x="118" y="30" width="4" height="20" rx="2" fill="#000" opacity="0.8" transform={`rotate(${i * 20}, 120, 120)`} />
+            ))}
+            {[...Array(36)].map((_, i) => (
+              <circle key={i} cx="120" cy="65" r="2.5" fill="#000" opacity="0.9" transform={`rotate(${i * 10}, 120, 120)`} />
+            ))}
+            <circle cx="120" cy="120" r="45" fill="#111" stroke="#333" strokeWidth="2" />
+            {[...Array(5)].map((_, i) => (
+              <circle key={i} cx="120" cy="95" r="5" fill="#2a2a2a" stroke="#444" strokeWidth="1" transform={`rotate(${i * 72}, 120, 120)`} />
+            ))}
+            <circle cx="120" cy="120" r="12" fill="#000" stroke="#222" strokeWidth="1" />
+          </svg>
+        </motion.div>
+        
+        {/* The Performance Caliper */}
+        <div className="absolute right-8 top-1/2 -translate-y-1/2 z-20">
+          <motion.div style={{ x: caliperX }} className="relative">
+            <svg width="110" height="210" viewBox="0 0 110 210" className="drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">
+              <path 
+                d="M5,15 L55,20 C80,20 95,45 95,100 C95,155 80,180 55,180 L5,185 L0,165 L15,165 C25,165 35,145 35,100 C35,55 25,35 15,35 L0,35 Z" 
+                fill="#ef4444" 
+                stroke="#991b1b" 
+                strokeWidth="3.5" 
+                strokeLinejoin="round" 
+              />
+              <path d="M55,25 C75,25 88,45 88,100 C88,155 75,175 55,175" fill="none" stroke="#ff6666" strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
+              <circle cx="26" cy="65" r="10" fill="#7f1d1d" opacity="0.6" />
+              <circle cx="26" cy="100" r="10" fill="#7f1d1d" opacity="0.6" />
+              <circle cx="26" cy="135" r="10" fill="#7f1d1d" opacity="0.6" />
+              <text x="72" y="100" transform="rotate(90, 72, 100)" fill="white" fontSize="18" fontWeight="950" fontFamily="Orbitron" letterSpacing="4" textAnchor="middle" dominantBaseline="middle" opacity="1" style={{ filter: 'drop-shadow(0 0 5px rgba(255,255,255,0.8))' }}>APEX</text>
+              <circle cx="78" cy="45" r="3" fill="#111" />
+              <circle cx="78" cy="155" r="3" fill="#111" />
+            </svg>
+          </motion.div>
+        </div>
+      </div>
+      
+      <div className="mt-12 flex flex-col items-center gap-6">
+        <div className="text-center">
+          <motion.h2 
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ repeat: Infinity, duration: 2 }}
+            className="font-orbitron text-3xl font-black tracking-[0.5em] text-white uppercase mb-2 drop-shadow-[0_0_15px_#3ecf8e]"
+          >
+            Apex Telemetry
+          </motion.h2>
+          <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
+            <motion.div 
+              animate={{ x: ['-100%', '100%'] }} 
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }} 
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-[#3ecf8e] to-transparent shadow-[0_0_10px_#3ecf8e]" 
+            />
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10 backdrop-blur-sm">
+          <Activity size={14} className="text-[#3ecf8e] animate-pulse" />
+          <span className="text-[10px] font-mono text-gray-400 tracking-[0.2em] uppercase">Synchronizing Systems...</span>
+        </div>
+      </div>
+
+    </div>
+  );
 }
 
 function formatTime(iso) {
@@ -68,31 +210,27 @@ function StatCard({ icon: Icon, label, value, sub, color = '#3ecf8e', animate = 
 
 
 // Tachometer for CPU (RPM style)
-function Tachometer({ value, color }) {
-  const [displayValue, setDisplayValue] = useState(0);
-  const currentVal = useRef(0);
+function Tachometer({ value, color, isReady }) {
+  const mv = useMotionValue(0);
   const isInitial = useRef(true);
   
   useEffect(() => {
-    if (isInitial.current) {
+    if (isReady && isInitial.current) {
       isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, value], {
-        delay: 0.8,
-        duration: 2.5,
+      const controls = animate(mv, [0, 100, 0, value], {
+        duration: 2.8,
         times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeInOut"
       });
       return controls.stop;
-    } else {
-      const controls = animate(currentVal.current, value, {
+    } else if (isReady && !isInitial.current) {
+      const controls = animate(mv, value, {
         duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeOut"
       });
       return controls.stop;
     }
-  }, [value]);
+  }, [value, mv, isReady]);
 
   const R = 54; const cx = 70; const cy = 70;
   const sweep = 240; 
@@ -104,12 +242,14 @@ function Tachometer({ value, color }) {
   const trackPath = `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 1 1 ${arcX(sweep)} ${arcY(sweep)}`;
   const redlinePath = `M ${arcX(sweep * 0.85)} ${arcY(sweep * 0.85)} A ${R} ${R} 0 0 1 ${arcX(sweep)} ${arcY(sweep)}`;
   
-  const fillSweep = (displayValue / 100) * sweep;
-  const fillPath = fillSweep > 0.5 ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${fillSweep > 180 ? 1 : 0} 1 ${arcX(fillSweep)} ${arcY(fillSweep)}` : '';
-
-  const needleRad = toRad(startAngle - fillSweep);
-  const nx = cx + (R - 12) * Math.cos(needleRad);
-  const ny = cy - (R - 12) * Math.sin(needleRad);
+  const fillSweep = useTransform(mv, v => (v / 100) * sweep);
+  const fillPath = useTransform(fillSweep, s => s > 0.5 ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${s > 180 ? 1 : 0} 1 ${arcX(s)} ${arcY(s)}` : '');
+  
+  const nx = useTransform(fillSweep, s => cx + (R - 12) * Math.cos(toRad(startAngle - s)));
+  const ny = useTransform(fillSweep, s => cy - (R - 12) * Math.sin(toRad(startAngle - s)));
+  const displayStr = useTransform(mv, v => Math.round(v).toString());
+  const textColor = useTransform(mv, v => v > 85 ? '#ef4444' : '#fff');
+  const glowColor = useTransform(mv, v => v > 85 ? '#ef4444' : color);
 
   return (
     <div className="relative flex flex-col items-center">
@@ -127,129 +267,120 @@ function Tachometer({ value, color }) {
           return <line key={i} x1={tnx} y1={tny} x2={tox} y2={toy} stroke={isRed ? '#ef4444' : '#555'} strokeWidth="2" />
         })}
 
-        {fillPath && <path d={fillPath} fill="none" stroke={displayValue > 85 ? '#ef4444' : color} strokeWidth="8" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${displayValue > 85 ? '#ef4444' : color})` }} />}
-        
-        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))' }} />
-        <circle cx={cx} cy={cy} r="5" fill="#222" stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2" />
+        <motion.path d={fillPath} fill="none" stroke={glowColor} strokeWidth="8" strokeLinecap="round" style={{ filter: useTransform(glowColor, c => `drop-shadow(0 0 6px ${c})`) }} />
+        <motion.line x1={cx} y1={cy} x2={nx} y2={ny} stroke={textColor} strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))' }} />
+        <circle cx={cx} cy={cy} r="5" fill="#222" stroke="#fff" strokeWidth="2" />
       </svg>
       <div className="absolute top-[85px] flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: displayValue > 85 ? '#ef4444' : '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
-          {Math.round(displayValue)}
-        </span>
-        <span className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: displayValue > 85 ? '#ef4444' : color, textShadow: `0 0 8px ${color}80`, transition: 'color 0.8s' }}>RPM x100</span>
+        <motion.span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: textColor, textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
+          {displayStr}
+        </motion.span>
+        <motion.span className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: glowColor, textShadow: useTransform(glowColor, c => `0 0 8px ${c}80`) }}>RPM x100</motion.span>
       </div>
     </div>
   );
 }
 
 // Fuel Gauge for RAM (Segmented)
-function FuelGauge({ percent, used, total, color }) {
-  const [displayValue, setDisplayValue] = useState(0);
-  const currentVal = useRef(0);
+function FuelGauge({ percent, used, total, color, isReady }) {
+  const mv = useMotionValue(0);
   const isInitial = useRef(true);
   
   useEffect(() => {
-    if (isInitial.current) {
+    if (isReady && isInitial.current) {
       isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, percent], {
-        delay: 0.8,
-        duration: 2.5,
+      const controls = animate(mv, [0, 100, 0, percent], {
+        duration: 2.8,
         times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeInOut"
       });
       return controls.stop;
-    } else {
-      const controls = animate(currentVal.current, percent, {
+    } else if (isReady && !isInitial.current) {
+      const controls = animate(mv, percent, {
         duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeOut"
       });
       return controls.stop;
     }
-  }, [percent]);
+  }, [percent, mv, isReady]);
 
   const segments = 16;
-  const activeSegments = Math.round((displayValue / 100) * segments);
+  const displayStr = useTransform(mv, v => `${Math.round(v)}`);
 
   return (
     <div className="flex flex-col w-full gap-2 mt-4">
       <div className="flex justify-between items-end mb-1">
         <span className="font-orbitron font-bold text-gray-500 text-xl leading-none">E</span>
         <div className="flex gap-1.5 flex-1 mx-4 h-10">
-          {Array.from({ length: segments }).map((_, i) => {
-            const isActive = i < activeSegments;
-            const isCritical = i >= segments - 2;
-            const segColor = isCritical ? '#ef4444' : (i >= segments - 5 ? '#f59e0b' : color);
-            return (
-              <div key={i} 
-                className="flex-1 rounded-sm skew-x-[-15deg] transition-all duration-300 border border-black/20"
-                style={{ 
-                  background: isActive ? segColor : '#ffffff05',
-                  boxShadow: isActive ? `0 0 10px ${segColor}80` : 'none',
-                  opacity: isActive ? 1 : 0.4
-                }} 
-              />
-            );
-          })}
+          {Array.from({ length: segments }).map((_, i) => (
+            <FuelSegment key={i} index={i} mv={mv} totalSegments={segments} color={color} />
+          ))}
         </div>
         <span className="font-orbitron font-bold text-gray-400 text-xl leading-none">F</span>
       </div>
-      <div className="flex justify-between text-[11px] text-gray-500 font-orbitron px-1 tracking-wider uppercase">
+      <div className="flex justify-between items-center text-[11px] text-gray-500 font-orbitron px-1 tracking-wider uppercase">
         <span>{used} MB</span>
+        <div className="flex items-center gap-1">
+          <motion.span className="text-white font-bold">{displayStr}</motion.span>
+          <span>%</span>
+        </div>
         <span>{total} MB</span>
       </div>
     </div>
   );
 }
 
+function FuelSegment({ index, mv, totalSegments, color }) {
+  const background = useTransform(mv, v => {
+    const activeSegments = Math.round((v / 100) * totalSegments);
+    if (index >= activeSegments) return '#ffffff05';
+    const isCritical = index >= totalSegments - 2;
+    return isCritical ? '#ef4444' : (index >= totalSegments - 5 ? '#f59e0b' : color);
+  });
+  const opacity = useTransform(mv, v => {
+    const activeSegments = Math.round((v / 100) * totalSegments);
+    return index < activeSegments ? 1 : 0.4;
+  });
+  const boxShadow = useTransform(background, bg => bg === '#ffffff05' ? 'none' : `0 0 10px ${bg}80`);
+
+  return (
+    <motion.div 
+      className="flex-1 rounded-sm skew-x-[-15deg] border border-black/20"
+      style={{ background, opacity, boxShadow }}
+    />
+  );
+}
+
 // Odometer for Disk Space
-function Odometer({ usedGb, totalGb, color }) {
-  const [displayUsed, setDisplayUsed] = useState(0);
-  const currentVal = useRef(0);
+function Odometer({ usedGb, totalGb, color, isReady }) {
+  const mv = useMotionValue(0);
   const isInitial = useRef(true);
   
   useEffect(() => {
-    if (isInitial.current) {
+    if (isReady && isInitial.current) {
       isInitial.current = false;
-      const controls = animate(0, [0, totalGb, 0, usedGb], {
-        delay: 0.8,
-        duration: 2.5,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
+      const controls = animate(mv, [0, 999999, 0, usedGb], {
+        duration: 3.2,
+        times: [0, 0.45, 0.75, 1],
+        ease: "easeInOut"
       });
       return controls.stop;
-    } else {
-      const controls = animate(currentVal.current, usedGb, {
+    } else if (isReady && !isInitial.current) {
+      const controls = animate(mv, usedGb, {
         duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
+        ease: "easeOut"
       });
       return controls.stop;
     }
-  }, [usedGb, totalGb]);
+  }, [usedGb, mv, isReady]);
 
-  const padStr = Math.round(displayUsed).toString().padStart(6, '0');
+  const displayUsed = useTransform(mv, v => Math.round(v).toString().padStart(6, '0'));
 
   return (
     <div className="flex items-center gap-5 bg-black/60 px-4 py-3 rounded-xl border border-white/5 shadow-inner">
       <div className="flex bg-[#111] p-1 rounded border-y border-white/10 shadow-[inset_0_4px_8px_rgba(0,0,0,0.8)]">
-        {padStr.split('').map((digit, i) => (
-          <div key={i} className={`w-7 h-10 flex items-center justify-center font-orbitron text-xl font-bold
-            ${i === padStr.length - 1 ? 'bg-white text-black' : 'bg-[#1a1a1a] text-gray-200'} 
-            border-r border-black/60 last:border-0 relative overflow-hidden`}
-          >
-            <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/50 pointer-events-none" />
-            <motion.span
-              key={digit + i}
-              initial={{ y: -20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-            >
-              {digit}
-            </motion.span>
-          </div>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <OdometerDigit key={i} index={i} displayUsed={displayUsed} />
         ))}
       </div>
       <div className="flex flex-col">
@@ -260,41 +391,46 @@ function Odometer({ usedGb, totalGb, color }) {
   );
 }
 
+function OdometerDigit({ index, displayUsed }) {
+  const digit = useTransform(displayUsed, s => s[index] || '0');
+  return (
+    <div className={`w-7 h-10 flex items-center justify-center font-orbitron text-xl font-bold
+      ${index === 5 ? 'bg-white text-black' : 'bg-[#1a1a1a] text-gray-200'} 
+      border-r border-black/60 last:border-0 relative overflow-hidden`}
+    >
+      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/50 pointer-events-none" />
+      <motion.span key={index}>
+        {digit}
+      </motion.span>
+    </div>
+  );
+}
+
 // Semi-circle pressure gauge — reads like a speedometer
-function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
+function PressureGauge({ load1m, load5m, load15m, cpuCores = 2, isReady }) {
   const pressure = Math.min((load1m / cpuCores) * 100, 120);
   const targetPct = Math.min(pressure, 100);
 
-  const [displayValue, setDisplayValue] = useState(0);
-  const currentVal = useRef(0);
+  const mv = useMotionValue(0);
   const isInitial = useRef(true);
   
   useEffect(() => {
-    if (isInitial.current) {
+    if (isReady && isInitial.current) {
       isInitial.current = false;
-      const controls = animate(0, [0, 100, 0, targetPct], {
-        delay: 0.8,
-        duration: 2.5,
+      const controls = animate(mv, [0, 100, 0, targetPct], {
+        duration: 2.8,
         times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeInOut"
       });
       return controls.stop;
-    } else {
-      const controls = animate(currentVal.current, targetPct, {
+    } else if (isReady && !isInitial.current) {
+      const controls = animate(mv, targetPct, {
         duration: 0.8,
-        ease: "easeOut",
-        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+        ease: "easeOut"
       });
       return controls.stop;
     }
-  }, [targetPct]);
-
-  let status, color, glow;
-  if (displayValue < 30)      { status = 'Idle';       color = '#3ecf8e'; glow = '#3ecf8e30'; }
-  else if (displayValue < 60) { status = 'Normal';     color = '#3b82f6'; glow = '#3b82f630'; }
-  else if (displayValue < 85) { status = 'Busy';       color = '#f59e0b'; glow = '#f59e0b30'; }
-  else               { status = 'Overloaded'; color = '#ef4444'; glow = '#ef444430'; }
+  }, [targetPct, mv, isReady]);
 
   const R = 52; const cx = 70; const cy = 68;
   const sweep = 180;
@@ -302,14 +438,28 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   const arcX = (a) => cx + R * Math.cos(toRad(180 - a));
   const arcY = (a) => cy - R * Math.sin(toRad(180 - a));
   const trackPath = `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 0 1 ${arcX(sweep)} ${arcY(sweep)}`;
-  const fillSweep = (displayValue / 100) * sweep;
-  const fillPath = fillSweep > 0.5
-    ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${fillSweep > 180 ? 1 : 0} 1 ${arcX(fillSweep)} ${arcY(fillSweep)}`
-    : '';
-  const needleRad = toRad(180 - fillSweep);
-  const nx = cx + (R - 10) * Math.cos(needleRad);
-  const ny = cy - (R - 10) * Math.sin(needleRad);
+  
+  const fillSweep = useTransform(mv, v => (v / 100) * sweep);
+  const fillPath = useTransform(fillSweep, s => s > 0.5 ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${s > 180 ? 1 : 0} 1 ${arcX(s)} ${arcY(s)}` : '');
+  const nx = useTransform(fillSweep, s => cx + (R - 10) * Math.cos(toRad(180 - s)));
+  const ny = useTransform(fillSweep, s => cy - (R - 10) * Math.sin(toRad(180 - s)));
+
+  const color = useTransform(mv, v => {
+    if (v < 30) return '#3ecf8e';
+    if (v < 60) return '#3b82f6';
+    if (v < 85) return '#f59e0b';
+    return '#ef4444';
+  });
+  const status = useTransform(mv, v => {
+    if (v < 30) return 'Idle';
+    if (v < 60) return 'Normal';
+    if (v < 85) return 'Busy';
+    return 'Overloaded';
+  });
+  const glow = useTransform(color, c => `${c}30`);
+  const displayStr = useTransform(mv, v => `${Math.round(v)}%`);
   const trend = load1m > load15m * 1.1 ? 'up' : load1m < load15m * 0.9 ? 'down' : 'flat';
+
   const zones = [
     { from: 0, to: 30, c: '#3ecf8e20' }, { from: 30, to: 60, c: '#3b82f620' },
     { from: 60, to: 85, c: '#f59e0b20' }, { from: 85, to: 100, c: '#ef444420' },
@@ -324,17 +474,17 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
             fill="none" stroke={c} strokeWidth="14" strokeLinecap="butt" />;
         })}
         <path d={trackPath} fill="none" stroke="#ffffff08" strokeWidth="6" strokeLinecap="round" />
-        {fillPath && <path d={fillPath} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
-          style={{ filter: `drop-shadow(0 0 5px ${color})` }} />}
-        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2.5" strokeLinecap="round"
-          style={{ filter: `drop-shadow(0 0 3px ${color})` }} />
-        <circle cx={cx} cy={cy} r="4" fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />
+        <motion.path d={fillPath} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+          style={{ filter: useTransform(color, c => `drop-shadow(0 0 5px ${c})`) }} />
+        <motion.line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2.5" strokeLinecap="round"
+          style={{ filter: useTransform(color, c => `drop-shadow(0 0 3px ${c})`) }} />
+        <motion.circle cx={cx} cy={cy} r="4" fill={color} style={{ filter: useTransform(color, c => `drop-shadow(0 0 5px ${c})`) }} />
         <text x="18" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">0</text>
         <text x="108" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">100%</text>
       </svg>
       <div className="flex items-center gap-2 -mt-2">
-        <span className="text-2xl font-bold font-orbitron" style={{ color }}>{Math.round(displayValue)}%</span>
-        <span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: `${color}40` }}>{status}</span>
+        <motion.span className="text-2xl font-bold font-orbitron" style={{ color }}>{displayStr}</motion.span>
+        <motion.span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: useTransform(color, c => `${c}40`) }}>{status}</motion.span>
         {trend === 'up'   && <span className="text-red-400 font-bold text-sm" title="Load increasing">↑</span>}
         {trend === 'down' && <span className="text-green-400 font-bold text-sm" title="Load decreasing">↓</span>}
         {trend === 'flat' && <span className="text-gray-500 text-sm" title="Load stable">→</span>}
@@ -385,6 +535,27 @@ export default function Overview() {
   const [liveLoading, setLiveLoading] = useState(true);
   const [histLoading, setHistLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [isReady, setIsReady] = useState(false);
+  const [minLoadingDone, setMinLoadingDone] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
+
+  useEffect(() => {
+    // Minimum visual time for the loader cycle
+    const timer = setTimeout(() => setMinLoadingDone(true), 1800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Monitor when data is actually ready
+  useEffect(() => {
+    if (liveData && minLoadingDone) {
+      setDataReady(true);
+    }
+  }, [liveData, minLoadingDone]);
+
+  // isReady is only set when the loader calls onReadyToExit callback
+  const handleLoaderExit = useCallback(() => {
+    setIsReady(true);
+  }, []);
 
   // Load nodes and instances once
   useEffect(() => {
@@ -451,28 +622,8 @@ export default function Overview() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
-      {/* Full Screen Cyberpunk Loader Overlay */}
-      {!liveData && createPortal(
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505]/80 backdrop-blur-md">
-          <div className="relative flex items-center justify-center w-64 h-64 mb-8">
-            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 8, ease: "linear" }} className="absolute inset-0 rounded-full border border-white/10 border-t-[#3ecf8e] opacity-80 shadow-[0_0_15px_#3ecf8e]" />
-            <motion.div animate={{ scale: [0.95, 1.05, 0.95], opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }} className="absolute inset-8 rounded-full border border-dashed border-[#3ecf8e]/50" />
-            <div className="absolute inset-16 bg-[radial-gradient(ellipse_at_center,_#3ecf8e33_0%,_transparent_70%)] rounded-full animate-pulse" />
-            <Activity size={40} className="text-[#3ecf8e] z-10" />
-          </div>
-          <h2 className="font-orbitron text-2xl font-bold tracking-[0.3em] text-white uppercase drop-shadow-[0_0_10px_rgba(62,207,142,0.5)]">Apex Telemetry</h2>
-          <div className="flex flex-col items-center mt-6 gap-2">
-            <div className="flex items-center gap-3">
-              <span className="w-2 h-2 bg-[#3ecf8e] rounded-full shadow-[0_0_8px_#3ecf8e] animate-ping" />
-              <span className="text-xs font-mono text-[#3ecf8e] tracking-widest uppercase">Establishing Secure Uplink</span>
-            </div>
-            <div className="w-48 h-1 bg-white/10 rounded overflow-hidden mt-2">
-              <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }} className="w-full h-full bg-[#3ecf8e] shadow-[0_0_10px_#3ecf8e]" />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Full Screen Disc Brake Loader Overlay - Handover based on physics loop */}
+      {!isReady && createPortal(<DiscBrakeLoader dataReady={dataReady} onReadyToExit={handleLoaderExit} />, document.body)}
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -547,7 +698,7 @@ export default function Overview() {
                   {cpuThresh.label}
                 </span>
               </div>
-              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} />
+              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} isReady={isReady} />
             </motion.div>
 
             {/* RAM (Fuel Gauge) */}
@@ -567,6 +718,7 @@ export default function Overview() {
                 used={liveData?.ram_used_mb || 0} 
                 total={liveData?.ram_total_mb || 1024} 
                 color={ramThresh.color} 
+                isReady={isReady}
               />
             </motion.div>
 
@@ -581,22 +733,25 @@ export default function Overview() {
                   {diskThresh.label}
                 </span>
               </div>
-              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} />
+              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} isReady={isReady} />
             </motion.div>
 
             {/* System Pressure (Turbo Boost) */}
             <motion.div whileHover={{ y: -2 }} className="glass p-5 rounded-2xl border border-white/5 shadow-inner flex flex-col items-center justify-center relative overflow-hidden">
-              <div className="absolute inset-0 opacity-10 pointer-events-none bg-[radial-gradient(circle_at_bottom,_var(--tw-gradient-stops))] from-purple-500 to-transparent" />
-              <div className="flex items-center gap-2 mb-2 self-start">
-                <Activity size={18} className="text-purple-400" />
-                <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">TURBO BOOST</span>
-                <span className="text-[9px] text-gray-500 font-orbitron ml-1 mt-0.5">[{liveData?.cpu_cores || 2} CORES]</span>
+              <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
+              <div className="flex justify-between items-center w-full mb-3">
+                <div className="flex items-center gap-2">
+                  <Zap size={18} className="text-blue-400" />
+                  <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">TURBO BOOST</span>
+                  <span className="text-[8px] text-gray-500 font-mono ml-1 uppercase">{liveData?.cpu_cores || 2} CORES!</span>
+                </div>
               </div>
-              <PressureGauge
-                load1m={liveData?.load_avg_1m || 0}
-                load5m={liveData?.load_avg_5m || 0}
-                load15m={liveData?.load_avg_15m || 0}
+              <PressureGauge 
+                load1m={liveData?.load_avg_1m || 0} 
+                load5m={liveData?.load_avg_5m || 0} 
+                load15m={liveData?.load_avg_15m || 0} 
                 cpuCores={liveData?.cpu_cores || 2}
+                isReady={isReady}
               />
             </motion.div>
 
@@ -703,10 +858,10 @@ export default function Overview() {
               <p className="text-xs mt-1 text-gray-700">Data is collected every 30 seconds once nodes are configured.</p>
             </div>
           </div>
-        ) : (
+        ) : isReady && (
           <>
             <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <AreaChart data={history} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
