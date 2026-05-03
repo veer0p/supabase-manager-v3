@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, RadialBarChart, RadialBar, Cell
+  ResponsiveContainer, RadialBarChart, RadialBar
 } from 'recharts';
 import { apiFetch } from '../lib/api';
 import Select from '../components/Select';
@@ -75,6 +75,69 @@ function GaugeChart({ value, label, color }) {
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-2xl font-bold" style={{ color }}>{fmt(value)}%</span>
         <span className="text-xs text-gray-500">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+// Semi-circle pressure gauge — reads like a speedometer
+function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
+  const pressure = Math.min((load1m / cpuCores) * 100, 120);
+  const pct = Math.min(pressure, 100);
+
+  let status, color, glow;
+  if (pct < 30)      { status = 'Idle';       color = '#3ecf8e'; glow = '#3ecf8e30'; }
+  else if (pct < 60) { status = 'Normal';     color = '#3b82f6'; glow = '#3b82f630'; }
+  else if (pct < 85) { status = 'Busy';       color = '#f59e0b'; glow = '#f59e0b30'; }
+  else               { status = 'Overloaded'; color = '#ef4444'; glow = '#ef444430'; }
+
+  const R = 52; const cx = 70; const cy = 68;
+  const sweep = 180;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const arcX = (a) => cx + R * Math.cos(toRad(180 - a));
+  const arcY = (a) => cy - R * Math.sin(toRad(180 - a));
+  const trackPath = `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 0 1 ${arcX(sweep)} ${arcY(sweep)}`;
+  const fillSweep = (pct / 100) * sweep;
+  const fillPath = fillSweep > 0.5
+    ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${fillSweep > 180 ? 1 : 0} 1 ${arcX(fillSweep)} ${arcY(fillSweep)}`
+    : '';
+  const needleRad = toRad(180 - fillSweep);
+  const nx = cx + (R - 10) * Math.cos(needleRad);
+  const ny = cy - (R - 10) * Math.sin(needleRad);
+  const trend = load1m > load15m * 1.1 ? 'up' : load1m < load15m * 0.9 ? 'down' : 'flat';
+  const zones = [
+    { from: 0, to: 30, c: '#3ecf8e20' }, { from: 30, to: 60, c: '#3b82f620' },
+    { from: 60, to: 85, c: '#f59e0b20' }, { from: 85, to: 100, c: '#ef444420' },
+  ];
+
+  return (
+    <div className="flex flex-col items-center w-full">
+      <svg width="140" height="90" viewBox="0 0 140 90" className="overflow-visible">
+        {zones.map(({ from, to, c }, i) => {
+          const f = (from / 100) * sweep; const t = (to / 100) * sweep;
+          return <path key={i} d={`M ${arcX(f)} ${arcY(f)} A ${R} ${R} 0 0 1 ${arcX(t)} ${arcY(t)}`}
+            fill="none" stroke={c} strokeWidth="14" strokeLinecap="butt" />;
+        })}
+        <path d={trackPath} fill="none" stroke="#ffffff08" strokeWidth="6" strokeLinecap="round" />
+        {fillPath && <path d={fillPath} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 5px ${color})` }} />}
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2.5" strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 3px ${color})` }} />
+        <circle cx={cx} cy={cy} r="4" fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />
+        <text x="18" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">0</text>
+        <text x="108" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">100%</text>
+      </svg>
+      <div className="flex items-center gap-2 -mt-2">
+        <span className="text-2xl font-bold" style={{ color }}>{Math.round(pct)}%</span>
+        <span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: `${color}40` }}>{status}</span>
+        {trend === 'up'   && <span className="text-red-400 font-bold text-sm" title="Load increasing">↑</span>}
+        {trend === 'down' && <span className="text-green-400 font-bold text-sm" title="Load decreasing">↓</span>}
+        {trend === 'flat' && <span className="text-gray-500 text-sm" title="Load stable">→</span>}
+      </div>
+      <div className="flex gap-4 mt-2.5 text-xs text-gray-600">
+        <span>1m <span className="text-gray-300 font-mono">{load1m.toFixed(2)}</span></span>
+        <span>5m <span className="text-gray-300 font-mono">{load5m.toFixed(2)}</span></span>
+        <span>15m <span className="text-gray-300 font-mono">{load15m.toFixed(2)}</span></span>
       </div>
     </div>
   );
@@ -179,13 +242,7 @@ export default function Overview() {
   const ramThresh = getThreshold(liveData?.ram_percent || 0);
   const diskThresh = getThreshold(liveData?.disk_percent || 0, 75, 90);
 
-  const loadBarData = liveData ? [
-    { name: '1m', value: liveData.load_avg_1m || 0 },
-    { name: '5m', value: liveData.load_avg_5m || 0 },
-    { name: '15m', value: liveData.load_avg_15m || 0 },
-  ] : [];
-
-  const activeCount = Object.values(instances).filter(i => i.status === 'active').length;
+  const activeCount = Object.values(instances).flat().filter(i => i.status === 'running').length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
@@ -306,29 +363,19 @@ export default function Overview() {
               </div>
             </motion.div>
 
-            {/* Load Average */}
-            <motion.div whileHover={{ y: -2 }} className="glass p-5 rounded-2xl border-gray-800">
-              <div className="flex items-center gap-2 mb-4">
+            {/* System Pressure */}
+            <motion.div whileHover={{ y: -2 }} className="glass p-5 rounded-2xl border-gray-800 flex flex-col items-center justify-center">
+              <div className="flex items-center gap-2 mb-2 self-start">
                 <Activity size={18} className="text-purple-400" />
-                <span className="font-semibold text-white">Load Average</span>
+                <span className="font-semibold text-white">System Pressure</span>
+                <span className="text-xs text-gray-600 ml-1">load / cores</span>
               </div>
-              <ResponsiveContainer width="100%" height={90}>
-                <BarChart data={loadBarData} barCategoryGap="30%">
-                  <XAxis dataKey="name" tick={{ fill: '#888', fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {loadBarData.map((entry, index) => (
-                      <Cell key={index} fill={entry.value > 2 ? '#ef4444' : entry.value > 1 ? '#f59e0b' : '#8b5cf6'} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="flex justify-between text-xs text-gray-500 mt-1 px-1">
-                <span>1 min: <span className="text-white">{fmt(liveData.load_avg_1m, 2)}</span></span>
-                <span>5 min: <span className="text-white">{fmt(liveData.load_avg_5m, 2)}</span></span>
-                <span>15 min: <span className="text-white">{fmt(liveData.load_avg_15m, 2)}</span></span>
-              </div>
+              <PressureGauge
+                load1m={liveData.load_avg_1m || 0}
+                load5m={liveData.load_avg_5m || 0}
+                load15m={liveData.load_avg_15m || 0}
+                cpuCores={2}
+              />
             </motion.div>
           </div>
         </section>
