@@ -26,9 +26,9 @@ jobs:
 
       - name: Deploy to VPS
         env:
-          VPS_HOST: ${{ secrets.VPS_IP }}
+          VPS_IP: ${{ secrets.VPS_IP }}
           VPS_USER: "root"
-          VPS_PASS: ${{ secrets.VPS_PASSWORD }}
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           node deploy_to_vps.js
