@@ -6,16 +6,15 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // --- Database Setup ---
-// When running on VPS, connects to manager-db on localhost:5435
-// When running locally, the DB won't be available but falls back gracefully
 const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres:vcp2CWFk91DO@localhost:5435/postgres';
-const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 5000 });
+const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 8000 });
 
 const query = async (sql, params = []) => {
     const client = await pool.connect();
