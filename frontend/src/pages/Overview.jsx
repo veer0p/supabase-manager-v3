@@ -140,7 +140,7 @@ export default function Overview() {
       } catch { setLiveLoading(false); }
     };
     fetchLive();
-    const int = setInterval(fetchLive, 5000);
+    const int = setInterval(fetchLive, 15000); // 15s — data updates every 30s via poller
     return () => clearInterval(int);
   }, [selectedNode]);
 
@@ -150,7 +150,7 @@ export default function Overview() {
       try { setAlerts(await apiFetch('/alerts')); } catch {}
     };
     fetchAlerts();
-    const int = setInterval(fetchAlerts, 15000);
+    const int = setInterval(fetchAlerts, 30000);
     return () => clearInterval(int);
   }, []);
 

@@ -354,32 +354,82 @@ app.post('/api/reset-password', async (req, res) => {
 // --- LOGS ---
 app.get('/api/logs/:id', (req, res) => res.json({ logs: global.deploymentLogs[req.params.id] || '' }));
 
-// --- LIVE STATS ---
+// --- LIVE STATS: serve from DB cache (30s poller), SSH only as fallback ---
+const statsCache = {}; // in-memory cache keyed by nodeId
+
+function parseMetricsRow(row) {
+    return {
+        cpu:                parseFloat(row.cpu_percent)         || 0,
+        ram_used_mb:        parseInt(row.ram_used_mb)           || 0,
+        ram_total_mb:       parseInt(row.ram_total_mb)          || 0,
+        ram_percent:        parseFloat(row.ram_percent)         || 0,
+        disk_percent:       parseFloat(row.disk_percent)        || 0,
+        disk_used_gb:       parseFloat(row.disk_used_gb)        || 0,
+        disk_total_gb:      parseFloat(row.disk_total_gb)       || 0,
+        load_avg_1m:        parseFloat(row.load_avg_1m)         || 0,
+        load_avg_5m:        parseFloat(row.load_avg_5m)         || 0,
+        load_avg_15m:       parseFloat(row.load_avg_15m)        || 0,
+        uptime_seconds:     parseInt(row.uptime_seconds)        || 0,
+        top_process_name:   row.top_process_name                || '',
+        top_process_ram_mb: parseInt(row.top_process_ram_mb)   || 0,
+        docker_container_count: parseInt(row.docker_container_count) || 0,
+        source: 'db',
+    };
+}
+
+function parsePipeOutput(stdout) {
+    const lines = stdout.trim().split('\n').filter(l => l.includes('|'));
+    const p = (lines[lines.length - 1] || '').split('|');
+    return {
+        cpu:                parseFloat(p[0])  || 0,
+        ram_used_mb:        parseInt(p[1])    || 0,
+        ram_total_mb:       parseInt(p[2])    || 0,
+        ram_percent:        parseFloat(p[3])  || 0,
+        disk_percent:       parseFloat(p[4])  || 0,
+        disk_used_gb:       parseFloat(p[5])  || 0,
+        disk_total_gb:      parseFloat(p[6])  || 0,
+        load_avg_1m:        parseFloat(p[7])  || 0,
+        load_avg_5m:        parseFloat(p[8])  || 0,
+        load_avg_15m:       parseFloat(p[9])  || 0,
+        uptime_seconds:     parseInt(p[10])   || 0,
+        top_process_name:   p[11]             || '',
+        top_process_ram_mb: parseInt(p[12])   || 0,
+        docker_container_count: parseInt(p[13]) || 0,
+        source: 'ssh',
+    };
+}
+
 app.get('/api/stats/:nodeId', async (req, res) => {
+    const { nodeId } = req.params;
     try {
-        const result = await runSSH(req.params.nodeId, 'python3 /opt/supabase-manager/metrics.py');
-        const lines = result.stdout.trim().split('\n').filter(l => l.includes('|'));
-        const lastLine = lines[lines.length - 1] || '';
-        const p = lastLine.split('|');
-        const data = {
-            cpu:                parseFloat(p[0])  || 0,
-            ram_used_mb:        parseInt(p[1])    || 0,
-            ram_total_mb:       parseInt(p[2])    || 0,
-            ram_percent:        parseFloat(p[3])  || 0,
-            disk_percent:       parseFloat(p[4])  || 0,
-            disk_used_gb:       parseFloat(p[5])  || 0,
-            disk_total_gb:      parseFloat(p[6])  || 0,
-            load_avg_1m:        parseFloat(p[7])  || 0,
-            load_avg_5m:        parseFloat(p[8])  || 0,
-            load_avg_15m:       parseFloat(p[9])  || 0,
-            uptime_seconds:     parseInt(p[10])   || 0,
-            top_process_name:   p[11] || '',
-            top_process_ram_mb: parseInt(p[12])   || 0,
-            docker_container_count: parseInt(p[13]) || 0,
-        };
+        // 1) Return in-memory cache if fresh (< 15s old)
+        const cached = statsCache[nodeId];
+        if (cached && (Date.now() - cached.ts) < 15000) {
+            return res.json(cached.data);
+        }
+
+        // 2) Serve from DB (latest row from 30s poller, must be < 90s old)
+        if (useDB) {
+            const rows = await query(`
+                SELECT * FROM vps_metrics
+                WHERE node_id = $1 AND recorded_at > NOW() - INTERVAL '90 seconds'
+                ORDER BY recorded_at DESC LIMIT 1
+            `, [nodeId]);
+            if (rows.length > 0) {
+                const data = parseMetricsRow(rows[0]);
+                statsCache[nodeId] = { ts: Date.now(), data };
+                return res.json(data);
+            }
+        }
+
+        // 3) Fallback: SSH (only if no DB or no recent row yet)
+        const result = await runSSH(nodeId, 'python3 /opt/supabase-manager/metrics.py');
+        const data = parsePipeOutput(result.stdout);
+        statsCache[nodeId] = { ts: Date.now(), data };
         res.json(data);
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
 
 // --- HISTORICAL METRICS ---
 app.get('/api/metrics/:nodeId', async (req, res) => {
