@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, animate } from 'framer-motion';
 import {
   Server, Database, AlertTriangle, Activity, Cpu, HardDrive,
@@ -399,8 +400,8 @@ export default function Overview() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
       {/* Full Screen Cyberpunk Loader Overlay */}
-      {!liveData && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#050505]/80 backdrop-blur-md">
+      {!liveData && createPortal(
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#050505]/80 backdrop-blur-md">
           <div className="relative flex items-center justify-center w-64 h-64 mb-8">
             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 8, ease: "linear" }} className="absolute inset-0 rounded-full border border-white/10 border-t-[#3ecf8e] opacity-80 shadow-[0_0_15px_#3ecf8e]" />
             <motion.div animate={{ scale: [0.95, 1.05, 0.95], opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }} className="absolute inset-8 rounded-full border border-dashed border-[#3ecf8e]/50" />
@@ -417,7 +418,8 @@ export default function Overview() {
               <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }} className="w-full h-full bg-[#3ecf8e] shadow-[0_0_10px_#3ecf8e]" />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Header */}
