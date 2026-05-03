@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Terminal, LogOut } from 'lucide-react';
+import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Terminal, LogOut, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from './lib/api';
 import { supabase } from './lib/supabase';
@@ -10,19 +10,22 @@ import Nodes from './pages/Nodes';
 import Instances from './pages/Instances';
 import Files from './pages/Files';
 import SettingsPage from './pages/Settings';
+import VisitorsPage from './pages/Visitors';
 import Login from './pages/Login';
 import { NotificationProvider, useNotification } from './NotificationContext';
 import { DiscBrakeLoader } from './components/DiscBrakeLoader';
+import VisitorModal from './components/VisitorModal';
 
 
 function Sidebar({ mobileOpen, setMobileOpen, alertCount, onLogout }) {
   const location = useLocation();
+  const isVisitor = localStorage.getItem('visitor_mode') === 'true';
   const links = [
     { name: 'Overview', path: '/', icon: LayoutDashboard },
     { name: 'VPS Nodes', path: '/nodes', icon: Server },
     { name: 'Supabase', path: '/instances', icon: Database },
     { name: 'File Explorer', path: '/files', icon: Folder },
-    { name: 'Settings', path: '/settings', icon: Settings },
+    ...(!isVisitor ? [{ name: 'Visitors', path: '/visitors', icon: Users }, { name: 'Settings', path: '/settings', icon: Settings }] : []),
   ];
 
   return (
@@ -33,7 +36,10 @@ function Sidebar({ mobileOpen, setMobileOpen, alertCount, onLogout }) {
             <div className="w-8 h-8 rounded-lg bg-[#3ecf8e] flex items-center justify-center shadow-[0_0_15px_#3ecf8e80]">
               <Terminal size={18} className="text-black" />
             </div>
-            <span className="text-lg font-bold font-orbitron tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400">APEX DASH</span>
+            <div className="flex flex-col">
+              <span className="text-lg font-bold font-orbitron tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400 leading-tight">APEX DASH</span>
+              {isVisitor && <span className="text-[8px] text-red-400 font-bold tracking-widest uppercase animate-pulse">Visitor Demo</span>}
+            </div>
           </div>
           <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setMobileOpen(false)}>
             <X size={20} />
@@ -79,7 +85,12 @@ function App() {
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    // Initial session check
+    if (localStorage.getItem('visitor_mode') === 'true') {
+      setSession({ user: { role: 'visitor' }, access_token: 'visitor_token' });
+      setAuthLoading(false);
+      return;
+    }
+    
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setAuthLoading(false);
@@ -101,7 +112,16 @@ function App() {
   }, [session]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    if (localStorage.getItem('visitor_mode') === 'true') {
+      localStorage.removeItem('visitor_mode');
+      // Fire-and-forget cleanup — destroys any visitor Supabase instances on VPS
+      fetch(
+        (import.meta.env.PROD ? '/api' : 'http://localhost:4000/api') + '/visitor/cleanup',
+        { method: 'POST', headers: { 'Authorization': 'Bearer visitor_token' } }
+      ).catch(() => {});
+    } else {
+      await supabase.auth.signOut();
+    }
     setSession(null);
   };
 
@@ -127,39 +147,44 @@ function App() {
         {!session ? (
           <Login onLogin={(s) => setSession(s)} />
         ) : (
-          <div className="min-h-screen bg-[#050505] text-gray-100 flex selection:bg-supa-green/30 selection:text-supa-green">
-            <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} alertCount={alertCount} onLogout={handleLogout} />
-          
-            <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden relative">
-              <header className="h-16 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center justify-between px-6 z-30">
-                <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setMobileOpen(true)}>
-                  <Menu size={20} />
-                </button>
-                <div className="flex-1 flex justify-end items-center gap-4">
-                  <div className="text-[10px] font-orbitron font-bold text-gray-500 flex items-center gap-2 uppercase tracking-widest border border-white/10 px-3 py-1.5 rounded bg-black/40 shadow-inner">
-                    <span className="w-2 h-2 rounded-full bg-[#3ecf8e] shadow-[0_0_8px_#3ecf8e]"></span> TELEMETRY ONLINE
+          <>
+            <div className="min-h-screen bg-[#050505] text-gray-100 flex selection:bg-supa-green/30 selection:text-supa-green">
+              <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} alertCount={alertCount} onLogout={handleLogout} />
+            
+              <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden relative">
+                <header className="h-16 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center justify-between px-6 z-30">
+                  <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setMobileOpen(true)}>
+                    <Menu size={20} />
+                  </button>
+                  <div className="flex-1 flex justify-end items-center gap-4">
+                    <div className="text-[10px] font-orbitron font-bold text-gray-500 flex items-center gap-2 uppercase tracking-widest border border-white/10 px-3 py-1.5 rounded bg-black/40 shadow-inner">
+                      <span className="w-2 h-2 rounded-full bg-[#3ecf8e] shadow-[0_0_8px_#3ecf8e]"></span> TELEMETRY ONLINE
+                    </div>
                   </div>
-                </div>
-              </header>
-              
-              <main className="flex-1 overflow-y-auto p-6 md:p-10 relative">
-                {/* Ambient Background Glow */}
-                <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-purple-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
-                <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+                </header>
                 
-                <AnimatePresence mode="wait">
-                  <Routes>
-                    <Route path="/" element={<Overview />} />
-                    <Route path="/nodes" element={<Nodes />} />
-                    <Route path="/instances" element={<Instances />} />
-                    <Route path="/files" element={<Files />} />
-                    <Route path="/settings" element={<SettingsPage />} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </AnimatePresence>
-              </main>
+                <main className="flex-1 overflow-y-auto p-6 md:p-10 relative">
+                  {/* Ambient Background Glow */}
+                  <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-purple-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+                  <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+                  
+                  <AnimatePresence mode="wait">
+                    <Routes>
+                      <Route path="/" element={<Overview />} />
+                      <Route path="/nodes" element={<Nodes />} />
+                      <Route path="/instances" element={<Instances />} />
+                      <Route path="/files" element={<Files />} />
+                      <Route path="/settings" element={<SettingsPage />} />
+                      <Route path="/visitors" element={<VisitorsPage />} />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </AnimatePresence>
+                </main>
+              </div>
             </div>
-          </div>
+            {/* Visitor lead capture modal — shown 60s after entering visitor mode */}
+            {localStorage.getItem('visitor_mode') === 'true' && <VisitorModal />}
+          </>
         )}
       </NotificationProvider>
     </Router>

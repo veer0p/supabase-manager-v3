@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Trash2, Key, Database, Eye, EyeOff, ExternalLink, Lock, Copy, Check } from 'lucide-react';
+import { Play, Trash2, Key, Database, Eye, EyeOff, ExternalLink, Lock, Copy, Check, Loader2, Server } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import Select from '../components/Select';
 import ConfirmModal from '../components/ConfirmModal';
@@ -19,6 +19,7 @@ export default function Instances() {
   const [copiedField, setCopiedField] = useState(null);
   const [form, setForm] = useState({ project_name: '', nodeId: '' });
   const [loading, setLoading] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
   const { error, success } = useNotification();
 
   const toggleVisibility = (instanceName, field) => {
@@ -53,7 +54,16 @@ export default function Instances() {
 
   const handleDeploy = async (e) => {
     e.preventDefault();
-    if (!form.nodeId) return error("Select a node first");
+    const errors = {};
+    if (!form.project_name.trim()) errors.project_name = "Project name is required";
+    else if (!/^[a-z0-9-]+$/.test(form.project_name)) errors.project_name = "Lowercase, numbers & hyphens only";
+    if (!form.nodeId) errors.nodeId = "Please select a target node";
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors({});
 
     setLoading(true);
     try {
@@ -92,22 +102,40 @@ export default function Instances() {
       </div>
 
       <section className="glass px-6 py-5 rounded-2xl border-gray-800/40 relative z-20">
-        <form onSubmit={handleDeploy} className="flex flex-wrap md:flex-nowrap items-stretch gap-4">
-          <div className="flex items-center gap-3 flex-1 min-w-[240px] bg-black/40 border border-white/5 rounded-xl px-4 transition-all focus-within:border-supa-green/50">
-            <Database className="text-gray-500" size={18} />
-            <input required placeholder="Project Name" value={form.project_name} onChange={e => setForm({ ...form, project_name: e.target.value.toLowerCase() })} pattern="[a-zA-Z0-9-]+" className="w-full bg-transparent border-none py-3 text-white placeholder:text-gray-600 focus:ring-0 outline-none font-medium text-sm" />
+        <form id="deploy-form" onSubmit={handleDeploy} noValidate className="flex flex-wrap md:flex-nowrap items-start gap-4">
+          <div className="flex-1 min-w-[240px] space-y-1.5">
+            <div className={`flex items-center gap-3 bg-black/40 border ${formErrors.project_name ? 'border-red-500/50' : 'border-white/5'} rounded-xl px-4 transition-all focus-within:border-supa-green/50`}>
+              <Database className={formErrors.project_name ? 'text-red-400' : 'text-gray-500'} size={18} />
+              <input 
+                placeholder="Project Name" 
+                value={form.project_name} 
+                onChange={e => {
+                  setForm({ ...form, project_name: e.target.value.toLowerCase() });
+                  if (formErrors.project_name) setFormErrors(p => ({ ...p, project_name: null }));
+                }}
+                className="w-full bg-transparent border-none py-3 text-white placeholder:text-gray-600 focus:ring-0 outline-none font-medium text-sm" 
+              />
+            </div>
+            {formErrors.project_name && <motion.p initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="text-[10px] text-red-400 font-bold uppercase tracking-widest pl-1">{formErrors.project_name}</motion.p>}
           </div>
 
-          <div className="flex-1 min-w-[240px]">
-            <Select
-              options={nodeOptions}
-              value={form.nodeId}
-              onChange={(val) => setForm({ ...form, nodeId: val })}
-              placeholder="Select Target Node"
-            />
+          <div className="flex-1 min-w-[240px] space-y-1.5">
+            <div className={formErrors.nodeId ? 'border-red-500/50 rounded-xl' : ''}>
+              <Select
+                icon={Server}
+                options={nodeOptions}
+                value={form.nodeId}
+                onChange={(val) => {
+                  setForm({ ...form, nodeId: val });
+                  if (formErrors.nodeId) setFormErrors(p => ({ ...p, nodeId: null }));
+                }}
+                placeholder="Select Target Node"
+              />
+            </div>
+            {formErrors.nodeId && <motion.p initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="text-[10px] text-red-400 font-bold uppercase tracking-widest pl-1">{formErrors.nodeId}</motion.p>}
           </div>
 
-          <button disabled={loading} type="submit" className="bg-supa-green text-black text-xs font-bold uppercase tracking-wider rounded-xl px-8 hover:bg-supa-greenHover transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer h-full min-h-[46px]">
+          <button disabled={loading} type="submit" className="bg-supa-green text-black text-xs font-bold uppercase tracking-wider rounded-xl px-8 hover:bg-supa-greenHover transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer h-[46px] mt-0">
             {loading ? 'Deploying...' : <><Play size={14} fill="currentColor" /> Deploy Instance</>}
           </button>
         </form>
@@ -154,21 +182,59 @@ export default function Instances() {
                     </div>
 
                     <div className="flex gap-2">
-                      {(isDeploying || isDeleting) && (
-                        <button onClick={() => setLogModal({ isOpen: true, name })} className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition cursor-pointer" title="Logs"><Eye size={18} /></button>
+                      <button onClick={() => setLogModal({ isOpen: true, name })} className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition cursor-pointer" title="Logs"><Eye size={18} /></button>
+                      {!isDeploying && !isDeleting && (
+                        <button onClick={() => setConfirmModal({ isOpen: true, type: 'reset', name })} className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition cursor-pointer" title="Reset"><Key size={18} /></button>
                       )}
-                      <button disabled={isDeploying || isDeleting} onClick={() => setConfirmModal({ isOpen: true, type: 'reset', name })} className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition disabled:opacity-20 cursor-pointer" title="Reset"><Key size={18} /></button>
-                      {!info.isProtected && (
+                      {!info.isProtected && !isDeploying && !isDeleting && (
                         <button onClick={() => setConfirmModal({ isOpen: true, type: 'delete', name })} className="p-2 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition cursor-pointer" title="Delete"><Trash2 size={18} /></button>
                       )}
                     </div>
 
                     <div className="h-8 w-px bg-gray-800"></div>
 
-                    <a href={`https://${info.studio_domain}/project/default`} target="_blank"
-                      className="bg-supa-green text-black px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-lg shadow-supa-green/10">
-                      <ExternalLink size={14} /> Launch Studio
-                    </a>
+                    {!isDeploying && !isDeleting && (
+                      <div className="flex flex-wrap gap-3">
+                        {info.status === 'error' ? (
+                          <button 
+                            onClick={() => {
+                              setForm({ project_name: name, nodeId: info.nodeId });
+                              // We use a small timeout to ensure state is set before triggering
+                              setTimeout(() => {
+                                document.getElementById('deploy-form')?.requestSubmit();
+                              }, 100);
+                            }}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-xl border border-orange-500/20 transition-all font-bold text-sm"
+                          >
+                            <Play size={16} /> Retry Deploy
+                          </button>
+                        ) : (
+                          <a 
+                            href={`https://${info.studio_domain}/project/default`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-supa-green/10 hover:bg-supa-green/20 text-supa-green rounded-xl border border-supa-green/20 transition-all font-bold text-sm"
+                          >
+                            <ExternalLink size={16} /> Launch Studio
+                          </a>
+                        )}
+                        
+                        <a 
+                          href={`https://${info.domain}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 transition-all font-bold text-sm"
+                        >
+                          <ExternalLink size={16} /> API Edge
+                        </a>
+                      </div>
+                    )}
+                    {(isDeploying || isDeleting) && (
+                      <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-900/50 rounded-xl border border-white/5 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                        <Loader2 size={14} className="animate-spin text-blue-400" />
+                        {isDeploying ? 'Deploying...' : 'Deleting...'}
+                      </div>
+                    )}
                   </div>
                 </div>
 

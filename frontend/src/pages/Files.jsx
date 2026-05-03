@@ -123,7 +123,11 @@ export default function Files() {
   };
 
   const FileList = ({ files, path, setPath, loading, selected, setSelected, isLocal }) => {
+    const isVisitor = localStorage.getItem('visitor_mode') === 'true';
+    const isRoot = isVisitor && !isLocal ? path === '/tmp/visitor_demo' : path === '/';
+
     const goUp = () => {
+        if (isRoot) return;
         const parts = path.split('/').filter(Boolean);
         if(parts.length > 0) {
             parts.pop();
@@ -140,7 +144,7 @@ export default function Files() {
               </div>
           ) : (
               <div className="flex flex-col gap-2">
-                  {path !== '/' && (
+                  {!isRoot && (
                       <div onDoubleClick={goUp} className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-transparent hover:border-white/10 hover:bg-white/10 transition-all cursor-pointer group">
                           <Folder size={16} className="text-gray-500" />
                           <span className="text-xs font-medium text-gray-400 group-hover:text-gray-300">.. (Up Level)</span>
@@ -175,18 +179,22 @@ export default function Files() {
     );
   };
 
-  const Breadcrumb = ({ path, setPath }) => (
+  const Breadcrumb = ({ path, setPath }) => {
+    const isVisitor = localStorage.getItem('visitor_mode') === 'true';
+    const basePath = isVisitor && path.startsWith('/tmp/visitor_demo') ? '/tmp/visitor_demo' : '/';
+    
+    return (
     <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono tracking-wider uppercase bg-black/40 p-2 rounded border border-white/5 overflow-x-auto whitespace-nowrap">
-        <button onClick={()=>setPath('/')} className="hover:text-white transition-colors cursor-pointer"><Home size={12}/></button>
+        <button onClick={()=>setPath(basePath)} className="hover:text-white transition-colors cursor-pointer"><Home size={12}/></button>
         <span className="text-gray-700">/</span>
-        {path.split('/').filter(Boolean).map((part, i, arr) => (
+        {path.replace(basePath, '').split('/').filter(Boolean).map((part, i, arr) => (
             <React.Fragment key={i}>
-                <button onClick={() => setPath('/' + arr.slice(0, i+1).join('/'))} className="hover:text-white transition-colors cursor-pointer truncate max-w-[80px]">{part}</button>
+                <button onClick={() => setPath(basePath + (basePath === '/' ? '' : '/') + arr.slice(0, i+1).join('/'))} className="hover:text-white transition-colors cursor-pointer truncate max-w-[80px]">{part}</button>
                 {i < arr.length - 1 && <span className="text-gray-700">/</span>}
             </React.Fragment>
         ))}
     </div>
-  );
+  )};
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 h-full flex flex-col pb-10">

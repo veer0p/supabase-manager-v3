@@ -1,12 +1,4 @@
 {
-  "test": {
-    "nodeId": "306dcf92-b417-4660-95fc-b8f6add9f666",
-    "domain": "test.veer-vps.duckdns.org",
-    "studio_domain": "test-studio.veer-vps.duckdns.org",
-    "password": "NRLU7QsDvVEZ",
-    "pgPassword": "nL4KGW67dwh5",
-    "status": "delete_error"
-  },
   "manager": {
     "nodeId": "dce10f84-50e9-4219-a295-0b1bf93f8079",
     "domain": "manager.veer-vps.duckdns.org",
@@ -14,5 +6,15 @@
     "password": "fJsEWlzJc3tH",
     "pgPassword": "kpxyLfeIymc2",
     "status": "error"
+  },
+  "testt": {
+    "nodeId": "dce10f84-50e9-4219-a295-0b1bf93f8079",
+    "domain": "testt.veer-vps.duckdns.org",
+    "studio_domain": "testt-studio.veer-vps.duckdns.org",
+    "password": "y911UHGJE3Ar",
+    "pgPassword": "lK7Av5wonVJL",
+    "status": "active",
+    "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE",
+    "serviceRoleKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
   }
 }

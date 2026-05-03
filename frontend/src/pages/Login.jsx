@@ -110,6 +110,20 @@ export default function Login({ onLogin }) {
             </button>
           </form>
 
+          <div className="mt-8 pt-6 border-t border-white/5 flex flex-col items-center">
+            <p className="text-gray-500 text-xs font-medium mb-4 uppercase tracking-widest text-center">Or Explore the Demo</p>
+            <button 
+              type="button"
+              onClick={() => {
+                localStorage.setItem('visitor_mode', 'true');
+                onLogin({ user: { role: 'visitor' }, access_token: 'visitor_token' });
+              }}
+              className="w-full bg-blue-500/10 border border-blue-500/30 text-blue-400 py-3 rounded-xl font-bold tracking-widest text-xs uppercase hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+            >
+              <Eye size={16} /> Enter Visitor Mode
+            </button>
+          </div>
+
           <div className="mt-8 pt-6 border-t border-white/5 text-center">
             <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">
               Restricted Access. Unauthorized entry is monitored.

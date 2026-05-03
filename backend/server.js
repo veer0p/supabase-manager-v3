@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // --- Database Setup ---
-const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres:vcp2CWFk91DO@localhost:5435/postgres';
+const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres:vcp2CWFk91DO@144.91.101.255:5435/postgres';
 const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 8000 });
 
 const query = async (sql, params = []) => {
@@ -40,6 +40,7 @@ async function initDB() {
                 domain TEXT NOT NULL, studio_domain TEXT NOT NULL, password TEXT NOT NULL,
                 pg_password TEXT, anon_key TEXT, service_role_key TEXT,
                 status TEXT NOT NULL, is_protected BOOLEAN DEFAULT false,
+                visitor_id TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE TABLE IF NOT EXISTS config (
@@ -64,6 +65,12 @@ async function initDB() {
                 top_process_ram_mb BIGINT DEFAULT 0,
                 docker_container_count INT DEFAULT 0,
                 cpu_cores INT DEFAULT 2
+            );
+            CREATE TABLE IF NOT EXISTS visitor_leads (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT, email TEXT, mobile TEXT, message TEXT, purpose TEXT,
+                visitor_id TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE INDEX IF NOT EXISTS idx_vps_metrics_node_time ON vps_metrics(node_id, recorded_at DESC);
             INSERT INTO config (id) VALUES (1) ON CONFLICT DO NOTHING;
@@ -128,7 +135,8 @@ const db = {
                 nodeId: r.node_id, domain: r.domain, studio_domain: r.studio_domain,
                 password: r.password, pgPassword: r.pg_password, 
                 anonKey: r.anon_key, serviceRoleKey: r.service_role_key,
-                status: r.status, isProtected: r.is_protected
+                status: r.status, isProtected: r.is_protected,
+                visitor_id: r.visitor_id
             };
             return acc;
         }, {});
@@ -141,14 +149,14 @@ const db = {
             return;
         }
         await query(`
-            INSERT INTO instances (project_name, node_id, domain, studio_domain, password, pg_password, anon_key, service_role_key, status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            INSERT INTO instances (project_name, node_id, domain, studio_domain, password, pg_password, anon_key, service_role_key, status, visitor_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             ON CONFLICT (project_name) DO UPDATE SET 
                 node_id=EXCLUDED.node_id, domain=EXCLUDED.domain, studio_domain=EXCLUDED.studio_domain,
                 password=EXCLUDED.password, pg_password=EXCLUDED.pg_password, 
                 anon_key=EXCLUDED.anon_key, service_role_key=EXCLUDED.service_role_key,
-                status=EXCLUDED.status
-        `, [name, data.nodeId, data.domain, data.studio_domain, data.password, data.pgPassword, data.anonKey || '', data.serviceRoleKey || '', data.status]);
+                status=EXCLUDED.status, visitor_id=COALESCE(instances.visitor_id, EXCLUDED.visitor_id)
+        `, [name, data.nodeId, data.domain, data.studio_domain, data.password, data.pgPassword, data.anonKey || '', data.serviceRoleKey || '', data.status, data.visitor_id]);
     },
     updateInstanceKeys: async (name, anonKey, serviceRoleKey) => {
         if (!useDB) {
@@ -210,6 +218,26 @@ const db = {
             return;
         }
         await query("UPDATE instances SET status='error' WHERE status IN ('deploying', 'deleting')");
+    },
+    addVisitorLead: async (lead) => {
+        const LEADS_FILE = path.join(DATA_DIR, 'visitor_leads.json');
+        if (!useDB) {
+            if (!fs.existsSync(LEADS_FILE)) fs.writeFileSync(LEADS_FILE, JSON.stringify([]));
+            const leads = JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8'));
+            leads.push({ ...lead, id: Date.now(), created_at: new Date().toISOString() });
+            fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2));
+            return;
+        }
+        await query('INSERT INTO visitor_leads (name, email, mobile, message, purpose, visitor_id) VALUES ($1,$2,$3,$4,$5,$6)',
+            [lead.name, lead.email, lead.mobile, lead.message, lead.purpose, lead.visitor_id]);
+    },
+    getVisitorLeads: async () => {
+        const LEADS_FILE = path.join(DATA_DIR, 'visitor_leads.json');
+        if (!useDB) {
+            if (!fs.existsSync(LEADS_FILE)) return [];
+            return JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8'));
+        }
+        return query('SELECT * FROM visitor_leads ORDER BY created_at DESC');
     }
 };
 
@@ -220,6 +248,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9s
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // --- Auth Middleware ---
+let visitorInstanceNames = new Set(); // Track visitor-created real instance names
+
 const authMiddleware = async (req, res, next) => {
     const config = await db.getConfig();
     if (!config.auth_enabled) return next();
@@ -230,6 +260,10 @@ const authMiddleware = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
+    if (token === 'visitor_token') {
+        req.user = { role: 'visitor' };
+        return next();
+    }
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
@@ -247,42 +281,71 @@ const generatePassword = () => crypto.randomBytes(9).toString('base64').replace(
 // Store deployment logs in memory
 global.deploymentLogs = {};
 
-async function runSSH(nodeId, script, logKey = null) {
-    const nodes = await db.getNodes();
-    const node = Array.isArray(nodes) ? nodes.find(n => n.id === nodeId) : null;
-    if (!node) throw new Error("Node not found");
-    if (logKey) global.deploymentLogs[logKey] = '';
-    const ssh = new NodeSSH();
-    await ssh.connect({ host: node.ip, username: 'root', password: node.password, readyTimeout: 20000 });
+async function runSSH(nodeOrId, script, logKey = null) {
+    let node = nodeOrId;
+    if (typeof nodeOrId === 'string') {
+        const nodes = await db.getNodes();
+        node = (Array.isArray(nodes) ? nodes : []).find(n => n.id === nodeOrId);
+    }
     
-    // Set a 10-minute timeout for the entire command to prevent hanging
-    const result = await ssh.execCommand(script, {
-        cwd: '/root',
-        onStdout: (chunk) => { 
-            const o = chunk.toString(); 
-            console.log(o); 
-            if (logKey) {
-                global.deploymentLogs[logKey] += o;
-                // Cap logs at ~50KB to prevent memory issues
-                if (global.deploymentLogs[logKey].length > 50000) {
-                    global.deploymentLogs[logKey] = global.deploymentLogs[logKey].slice(-50000);
-                }
-            }
-        },
-        onStderr: (chunk) => { 
-            const e = chunk.toString(); 
-            console.error(e); 
-            if (logKey) {
-                global.deploymentLogs[logKey] += e;
-                if (global.deploymentLogs[logKey].length > 50000) {
-                    global.deploymentLogs[logKey] = global.deploymentLogs[logKey].slice(-50000);
-                }
-            }
-        },
-    });
-    ssh.dispose();
-    if (result.code !== 0) throw new Error(`SSH failed: ${result.stderr}`);
-    return result;
+    if (!node) throw new Error("Node not found");
+    
+    const log = (msg) => {
+        if (logKey && global.deploymentLogs[logKey] !== undefined) {
+            global.deploymentLogs[logKey] += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        }
+    };
+
+    log(`🛰️ Establishing SSH connection to ${node.name || 'node'} (${node.ip})...`);
+    
+    const ssh = new NodeSSH();
+    
+    try {
+        // SSH Connection with hard timeout
+        await Promise.race([
+            ssh.connect({ 
+                host: node.ip, 
+                username: 'root', 
+                password: node.password, 
+                readyTimeout: 30000,
+                keepaliveInterval: 10000,
+                keepaliveCountMax: 3
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('SSH connection timed out after 30s')), 35000))
+        ]);
+
+        log(`✅ Connected. Starting script execution...`);
+
+        // Set a 15-minute timeout for the entire command
+        const result = await Promise.race([
+            ssh.execCommand(script, {
+                cwd: '/root',
+                onStdout: (chunk) => { 
+                    const o = chunk.toString(); 
+                    if (logKey && global.deploymentLogs[logKey] !== undefined) {
+                        global.deploymentLogs[logKey] += o;
+                        if (global.deploymentLogs[logKey].length > 100000) {
+                            global.deploymentLogs[logKey] = global.deploymentLogs[logKey].slice(-100000);
+                        }
+                    }
+                },
+                onStderr: (chunk) => { 
+                    const e = chunk.toString(); 
+                    if (logKey && global.deploymentLogs[logKey] !== undefined) {
+                        global.deploymentLogs[logKey] += e;
+                    }
+                },
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Deployment execution timed out after 15 minutes')), 15 * 60 * 1000))
+        ]);
+
+        ssh.dispose();
+        if (result.code !== 0) throw new Error(`Script exited with code ${result.code}: ${result.stderr}`);
+        return result;
+    } catch (err) {
+        ssh.dispose();
+        throw err;
+    }
 }
 
 // --- CONFIG ---
@@ -292,23 +355,48 @@ app.post('/api/config', async (req, res) => { await db.setConfig(req.body); res.
 // --- NODES ---
 app.get('/api/nodes', async (req, res) => {
     const nodes = await db.getNodes();
-    res.json((Array.isArray(nodes) ? nodes : []).map(n => ({ id: n.id, name: n.name, ip: n.ip })));
+    // Strip passwords for everyone — visitors see real names/IPs but can't add/edit
+    const safeNodes = (Array.isArray(nodes) ? nodes : []).map(n => ({ id: n.id, name: n.name, ip: n.ip }));
+    res.json(safeNodes);
 });
 app.post('/api/nodes', async (req, res) => {
+    if (req.user?.role === 'visitor') return res.status(403).json({ error: 'Action blocked in Demo Mode.' });
     const { name, ip, password } = req.body;
     if (!name || !ip || !password) return res.status(400).json({ error: 'Missing fields' });
     const id = crypto.randomUUID();
     await db.addNode({ id, name, ip, password });
     res.json({ success: true, id });
 });
-app.delete('/api/nodes/:id', async (req, res) => { await db.deleteNode(req.params.id); res.json({ success: true }); });
+app.delete('/api/nodes/:id', async (req, res) => { 
+    if (req.user?.role === 'visitor') return res.status(403).json({ error: 'Action blocked in Demo Mode.' });
+    await db.deleteNode(req.params.id); 
+    res.json({ success: true }); 
+});
 
 // --- INSTANCES ---
-app.get('/api/instances', async (req, res) => res.json(await db.getInstances()));
+app.get('/api/instances', async (req, res) => {
+    if (req.user?.role === 'visitor') {
+        const all = await db.getInstances();
+        const visitorOnly = {};
+        for (const [name, info] of Object.entries(all)) {
+            if (info.visitor_id === 'demo-visitor') {
+                visitorOnly[name] = info;
+            }
+        }
+        return res.json(visitorOnly);
+    }
+    res.json(await db.getInstances());
+});
 
 app.post('/api/deploy', async (req, res) => {
     const { project_name, nodeId } = req.body;
     if (!project_name || !nodeId) return res.status(400).json({ error: 'project_name and nodeId required' });
+
+    if (req.user?.role === 'visitor') {
+        const all = await db.getInstances();
+        const count = Object.values(all).filter(i => i.visitor_id === 'demo-visitor').length;
+        if (count >= 2) return res.status(403).json({ error: 'Demo limit reached (max 2 instances).' });
+    }
 
     const nodes = await db.getNodes();
     const node = (Array.isArray(nodes) ? nodes : []).find(n => n.id === nodeId);
@@ -319,22 +407,39 @@ app.post('/api/deploy', async (req, res) => {
     const password = generatePassword();
     const pgPassword = generatePassword();
 
-    await db.upsertInstance(project_name, { nodeId, domain, studio_domain, password, pgPassword, status: 'deploying' });
+    await db.upsertInstance(project_name, { 
+        nodeId, domain, studio_domain, password, pgPassword, status: 'deploying',
+        visitor_id: req.user?.role === 'visitor' ? 'demo-visitor' : null
+    });
+    global.deploymentLogs[project_name] = `[${new Date().toLocaleTimeString()}] Starting deployment of "${project_name}"...\n`;
     res.json({ success: true });
 
     const email = `admin@veer-vps.duckdns.org`;
     const script = `#!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
+echo "[$(date +%T)] Starting deployment sequence..."
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg git ufw coreutils
 if ! command -v docker &> /dev/null; then
+    echo "[$(date +%T)] Installing Docker..."
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     apt-get update -y && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
+DOCKER_CMD="docker compose"
+if ! command -v docker compose &> /dev/null; then 
+    if command -v docker-compose &> /dev/null; then
+        DOCKER_CMD="docker-compose"
+    else
+        echo "[$(date +%T)] Installing Docker Compose plugin..."
+        apt-get update -y && apt-get install -y docker-compose-plugin
+    fi
+fi
+echo "[$(date +%T)] Using $DOCKER_CMD"
+
 if ! command -v caddy &> /dev/null; then
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -343,7 +448,12 @@ if ! command -v caddy &> /dev/null; then
 fi
 PROJ_DIR="/opt/supabase-${project_name}"
 if [ ! -d "$PROJ_DIR" ]; then
+    echo "[$(date +%T)] Cloning Supabase repository..."
     git clone --depth 1 https://github.com/supabase/supabase "$PROJ_DIR"
+fi
+if [ ! -d "$PROJ_DIR/docker" ]; then
+    echo "[$(date +%T)] ERROR: Docker directory not found in $PROJ_DIR"
+    exit 1
 fi
 cd "$PROJ_DIR/docker"
 cp -n .env.example .env || true
@@ -353,22 +463,23 @@ cp -n .env.example .env || true
     sed -i "s|^SITE_URL=.*|SITE_URL=https://${studio_domain}|" .env
     
     # Assign unique ports to avoid conflicts (using port offset based on hash)
-    PORT_OFFSET=$(echo "${project_name}" | cksum | awk '{print $1 % 100}')
-    HTTP_PORT=$((9000 + PORT_OFFSET * 2))
-    STUDIO_PORT=$((9001 + PORT_OFFSET * 2))
-    PG_PORT=$((5440 + PORT_OFFSET))
+     PORT_OFFSET=$(echo "${project_name}" | cksum | awk '{print $1 % 100}')
+     HTTP_PORT=$((9000 + PORT_OFFSET * 3))
+     STUDIO_PORT=$((9001 + PORT_OFFSET * 3))
+     KONG_SSL_PORT=$((9002 + PORT_OFFSET * 3))
+     PG_PORT=$((5440 + PORT_OFFSET))
     POOL_PORT=$((6543 + PORT_OFFSET))
-    
-    {
-      echo "COMPOSE_PROJECT_NAME=supabase_${project_name}"
-      echo "POSTGRES_PORT=${PG_PORT}"
-      echo "KONG_HTTP_PORT=${HTTP_PORT}"
-      echo "KONG_HTTPS_PORT=${STUDIO_PORT}"
-      echo "POOLER_PROXY_PORT_TRANSACTION=${POOL_PORT}"
-    } >> .env
+        {
+       echo "COMPOSE_PROJECT_NAME=supabase_${project_name}"
+       echo "POSTGRES_PORT=$PG_PORT"
+       echo "KONG_HTTP_PORT=$HTTP_PORT"
+       echo "KONG_HTTPS_PORT=$KONG_SSL_PORT"
+       echo "POOLER_PROXY_PORT_TRANSACTION=$POOL_PORT"
+     } >> .env
 
-    # Remove hardcoded container names to allow multiple instances on one host
+    # Remove hardcoded container names and map Studio port using robust perl replacement
     sed -i "/container_name:/d" docker-compose.yml
+    perl -i -pe "s/^  studio:\$/  studio:\n    ports:\n      - $STUDIO_PORT:3000/" docker-compose.yml
 grep -q "${domain}" /etc/caddy/Caddyfile || cat >> /etc/caddy/Caddyfile <<CADDYEOF
 
 ${domain} {
@@ -381,8 +492,12 @@ ${studio_domain} {
 }
 CADDYEOF
 systemctl restart caddy
-docker compose pull
-docker compose up -d
+echo "[$(date +%T)] Pulling images..."
+$DOCKER_CMD pull
+echo "[$(date +%T)] Starting containers..."
+$DOCKER_CMD up -d
+echo "[$(date +%T)] Extraction keys..."
+
 echo "---SUPABASE_KEYS_START---"
 grep "^ANON_KEY=" .env || true
 grep "^SERVICE_ROLE_KEY=" .env || true
@@ -390,7 +505,7 @@ echo "---SUPABASE_KEYS_END---"
 ufw allow 80/tcp || true && ufw allow 443/tcp || true && ufw allow 22/tcp || true && ufw allow 4000/tcp || true && ufw --force enable || true
 `;
     try {
-        const result = await runSSH(nodeId, script, project_name);
+        const result = await runSSH(node, script, project_name);
         
         // Extract keys from result.stdout
         let anonKey = '';
@@ -398,11 +513,12 @@ ufw allow 80/tcp || true && ufw allow 443/tcp || true && ufw allow 22/tcp || tru
         const lines = result.stdout.split('\n');
         let inKeys = false;
         lines.forEach(line => {
-            if (line.includes('---SUPABASE_KEYS_START---')) inKeys = true;
-            else if (line.includes('---SUPABASE_KEYS_END---')) inKeys = false;
+            const clean = line.trim();
+            if (clean.includes('---SUPABASE_KEYS_START---')) inKeys = true;
+            else if (clean.includes('---SUPABASE_KEYS_END---')) inKeys = false;
             else if (inKeys) {
-                if (line.startsWith('ANON_KEY=')) anonKey = line.split('=')[1].trim();
-                if (line.startsWith('SERVICE_ROLE_KEY=')) serviceRoleKey = line.split('=')[1].trim();
+                if (clean.startsWith('ANON_KEY=')) anonKey = clean.split('=')[1].replace(/['"]/g, '').trim();
+                if (clean.startsWith('SERVICE_ROLE_KEY=')) serviceRoleKey = clean.split('=')[1].replace(/['"]/g, '').trim();
             }
         });
 
@@ -411,11 +527,66 @@ ufw allow 80/tcp || true && ufw allow 443/tcp || true && ufw allow 22/tcp || tru
     } catch (e) {
         console.error('Deploy error:', e);
         await db.updateInstanceStatus(project_name, 'error');
+        if (project_name && global.deploymentLogs[project_name] !== undefined) {
+            global.deploymentLogs[project_name] += `\n[${new Date().toLocaleTimeString()}] ❌ DEPLOYMENT FAILED: ${e.message}\n`;
+        }
     }
+});
+
+// --- VISITOR CLEANUP: destroy all visitor instances on logout ---
+app.post('/api/visitor/cleanup', async (req, res) => {
+    const names = [...visitorInstanceNames];
+    visitorInstanceNames.clear();
+    res.json({ success: true, cleaning: names });
+    for (const project_name of names) {
+        try {
+            const instances = await db.getInstances();
+            const inst = instances[project_name];
+            if (!inst) continue;
+            const script = `#!/bin/bash
+PROJ_DIR="/opt/supabase-${project_name}"
+if [ -d "$PROJ_DIR/docker" ]; then 
+    cd "$PROJ_DIR/docker"
+    DOCKER_CMD="docker compose"
+    if ! command -v docker compose &> /dev/null; then DOCKER_CMD="docker-compose"; fi
+    $DOCKER_CMD down -v || true
+fi
+rm -rf "$PROJ_DIR"
+sed -i "/${project_name}/,/^}/d" /etc/caddy/Caddyfile || true
+systemctl restart caddy || true
+`;
+            await runSSH(inst.nodeId, script, project_name);
+            await db.deleteInstance(project_name);
+        } catch(e) { console.error('Visitor cleanup error for', project_name, e.message); }
+    }
+});
+
+// --- VISITOR LEAD CAPTURE ---
+app.post('/api/visitor/lead', async (req, res) => {
+    try {
+        const { name, email, mobile, message, purpose, visitor_id } = req.body;
+        await db.addVisitorLead({ name, email, mobile, message, purpose, visitor_id });
+        res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- ADMIN: Get visitor leads ---
+app.get('/api/admin/visitors', async (req, res) => {
+    if (req.user?.role === 'visitor') return res.status(403).json({ error: 'Access denied.' });
+    try {
+        const leads = await db.getVisitorLeads();
+        res.json(leads);
+    } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/delete', async (req, res) => {
     const { project_name } = req.body;
+    
+    if (req.user?.role === 'visitor') {
+        visitorInstanceNames.delete(project_name);
+        // Fall through to real delete
+    }
+
     const instances = await db.getInstances();
     const inst = instances[project_name];
     if (!inst) return res.status(404).json({ error: 'Instance not found' });
@@ -599,6 +770,9 @@ app.get('/api/alerts', async (req, res) => {
 
 // --- LOCAL PC FILE BROWSER ---
 app.get('/api/local/files', async (req, res) => {
+    if (req.user?.role === 'visitor') {
+        return res.json({ path: '/restricted_demo', files: [{ name: 'Access_Denied_Local_Workstation.txt', size: 0, isDirectory: false }] });
+    }
     const os = require('os');
     const dir = req.query.path || os.homedir();
     try {
@@ -620,8 +794,14 @@ app.get('/api/local/files', async (req, res) => {
 
 // --- VPS FILE BROWSER ---
 app.get('/api/files/:nodeId', async (req, res) => {
-    const dir = req.query.path || '/';
+    let dir = req.query.path || '/';
+    if (req.user?.role === 'visitor') {
+        if (!dir.startsWith('/tmp/visitor_demo')) dir = '/tmp/visitor_demo';
+    }
     try {
+        if (req.user?.role === 'visitor') {
+            await runSSH(req.params.nodeId, `mkdir -p /tmp/visitor_demo && chmod 777 /tmp/visitor_demo`);
+        }
         const script = `ls -lA "${dir}" | tail -n +2 | awk '{print $1, $5, $9}' | grep -v "^$"`;
         const result = await runSSH(req.params.nodeId, script);
         const files = result.stdout.trim().split('\n').filter(Boolean).map(line => {
@@ -629,7 +809,11 @@ app.get('/api/files/:nodeId', async (req, res) => {
             return { name: parts[2], size: parseInt(parts[1], 10) || 0, isDirectory: parts[0].startsWith('d') };
         }).filter(f => f.name);
         res.json({ path: dir, files });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) {
+        // Return empty directory instead of crashing - node may be offline
+        console.warn('File browser SSH error for node', req.params.nodeId, ':', e.message);
+        res.json({ path: dir, files: [], error: 'Could not connect to node. It may be offline.' });
+    }
 });
 
 const upload = multer({ dest: 'uploads/' });
@@ -650,6 +834,8 @@ app.post('/api/files/upload/:nodeId', upload.single('file'), async (req, res) =>
 
 // --- HIGH SPEED TRANSFER TUNNEL ---
 app.post('/api/tunnel/transfer', async (req, res) => {
+    if (req.user?.role === 'visitor') return res.status(403).json({ error: 'Tunnel transfer blocked in Demo Mode.' });
+    
     const { nodeId, direction, localPath, remotePath } = req.body;
     // direction: 'local_to_vps' or 'vps_to_local'
     if (!nodeId || !localPath || !remotePath) return res.status(400).json({ error: 'Missing paths or node' });
