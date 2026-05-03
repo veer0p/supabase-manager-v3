@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Key, Terminal } from 'lucide-react';
+import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Terminal, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiFetch } from './lib/api';
 
 import Overview from './pages/Overview';
 import Nodes from './pages/Nodes';
@@ -10,7 +11,7 @@ import Files from './pages/Files';
 import SettingsPage from './pages/Settings';
 import { NotificationProvider } from './NotificationContext';
 
-function Sidebar({ mobileOpen, setMobileOpen }) {
+function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
   const location = useLocation();
   const links = [
     { name: 'Overview', path: '/', icon: LayoutDashboard },
@@ -39,10 +40,16 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
           {links.map((link) => {
             const isActive = location.pathname === link.path;
             const Icon = link.icon;
+            const showBadge = link.path === '/' && alertCount > 0;
             return (
               <Link key={link.name} to={link.path} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${isActive ? 'bg-white/5 text-supa-green border border-white/10' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200 border border-transparent'}`}>
                 <Icon size={18} className={isActive ? 'text-supa-green' : 'text-gray-500'} />
-                <span className="font-medium text-sm">{link.name}</span>
+                <span className="font-medium text-sm flex-1">{link.name}</span>
+                {showBadge && (
+                  <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                    {alertCount}
+                  </span>
+                )}
                 {isActive && <motion.div layoutId="activeNav" className="absolute left-0 w-1 h-6 bg-supa-green rounded-r-full" />}
               </Link>
             );
@@ -56,12 +63,20 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
 
 function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
+
+  useEffect(() => {
+    const fetchAlerts = () => apiFetch('/alerts').then(a => setAlertCount(a.length)).catch(() => {});
+    fetchAlerts();
+    const int = setInterval(fetchAlerts, 15000);
+    return () => clearInterval(int);
+  }, []);
 
   return (
     <Router>
-      <NotificationProvider>
+        <NotificationProvider>
         <div className="min-h-screen bg-[#050505] text-gray-100 flex selection:bg-supa-green/30 selection:text-supa-green">
-        <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+          <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} alertCount={alertCount} />
         
         <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden">
           <header className="h-16 border-b border-gray-800/60 bg-[#0a0a0a]/80 backdrop-blur-xl flex items-center justify-between px-6 z-30">

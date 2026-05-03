@@ -37,13 +37,33 @@ async function initDB() {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE TABLE IF NOT EXISTS instances (
-                project_name TEXT PRIMARY KEY, node_id UUID REFERENCES vps_nodes(id) ON DELETE SET NULL,
+                project_name TEXT PRIMARY KEY, node_id UUID,
                 domain TEXT NOT NULL, studio_domain TEXT NOT NULL, password TEXT NOT NULL,
                 pg_password TEXT, status TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE TABLE IF NOT EXISTS config (
                 id INTEGER PRIMARY KEY DEFAULT 1, auth_enabled BOOLEAN DEFAULT true, admin_pass TEXT DEFAULT 'admin123'
             );
+            CREATE TABLE IF NOT EXISTS vps_metrics (
+                id BIGSERIAL PRIMARY KEY,
+                node_id UUID,
+                recorded_at TIMESTAMPTZ DEFAULT NOW(),
+                cpu_percent FLOAT DEFAULT 0,
+                ram_percent FLOAT DEFAULT 0,
+                ram_used_mb BIGINT DEFAULT 0,
+                ram_total_mb BIGINT DEFAULT 0,
+                disk_percent FLOAT DEFAULT 0,
+                disk_used_gb FLOAT DEFAULT 0,
+                disk_total_gb FLOAT DEFAULT 0,
+                load_avg_1m FLOAT DEFAULT 0,
+                load_avg_5m FLOAT DEFAULT 0,
+                load_avg_15m FLOAT DEFAULT 0,
+                uptime_seconds BIGINT DEFAULT 0,
+                top_process_name TEXT DEFAULT '',
+                top_process_ram_mb BIGINT DEFAULT 0,
+                docker_container_count INT DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_vps_metrics_node_time ON vps_metrics(node_id, recorded_at DESC);
             INSERT INTO config (id) VALUES (1) ON CONFLICT DO NOTHING;
         `);
         console.log('DB initialized');
@@ -337,9 +357,102 @@ app.get('/api/logs/:id', (req, res) => res.json({ logs: global.deploymentLogs[re
 // --- LIVE STATS ---
 app.get('/api/stats/:nodeId', async (req, res) => {
     try {
-        const script = `echo "{\\"cpu\\": $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'), \\"mem\\": $(free -m | awk 'NR==2{printf "%.2f", $3*100/$2 }')}"`;
-        const result = await runSSH(req.params.nodeId, script);
-        res.json(JSON.parse(result.stdout));
+        const parts0 = [
+          'CPU=$(top -bn2 | grep "Cpu(s)" | tail -1 | sed \'s/.*, *\\([0-9.]*\\)%* id.*/\\1/\' | awk \'{print 100 - $1}\')',
+          'RAM_USED=$(free -m | awk \'NR==2{print $3}\')',
+          'RAM_TOTAL=$(free -m | awk \'NR==2{print $2}\')',
+          'RAM_PCT=$(free -m | awk \'NR==2{printf "%.1f", $3*100/$2}\')',
+          'DISK_PCT=$(df / | awk \'NR==2{print $5}\' | tr -d \'%\')',
+          'DISK_USED=$(df -BG / | awk \'NR==2{print $3}\' | tr -d \'G\')',
+          'DISK_TOTAL=$(df -BG / | awk \'NR==2{print $2}\' | tr -d \'G\')',
+          'LOAD=$(cat /proc/loadavg | awk \'{print $1, $2, $3}\')',
+          'UPTIME=$(cat /proc/uptime | awk \'{print int($1)}\')',
+          'TOP_PROC=$(ps aux --sort=-%mem | awk \'NR==2{print $11}\' | xargs -I{} basename {})',
+          'TOP_RAM=$(ps aux --sort=-%mem | awk \'NR==2{printf "%d", $6/1024}\')',
+          'DOCKER_COUNT=$(docker ps -q 2>/dev/null | wc -l)',
+          'echo "$CPU|$RAM_USED|$RAM_TOTAL|$RAM_PCT|$DISK_PCT|$DISK_USED|$DISK_TOTAL|$LOAD|$UPTIME|$TOP_PROC|$TOP_RAM|$DOCKER_COUNT"',
+        ].join('\n');
+        const result = await runSSH(req.params.nodeId, parts0);
+        const parts = result.stdout.trim().split('|');
+        const [la1, la5, la15] = (parts[7] || '0 0 0').split(' ');
+        const data = {
+            cpu: parseFloat(parts[0]) || 0,
+            ram_used_mb: parseInt(parts[1]) || 0,
+            ram_total_mb: parseInt(parts[2]) || 0,
+            ram_percent: parseFloat(parts[3]) || 0,
+            disk_percent: parseFloat(parts[4]) || 0,
+            disk_used_gb: parseFloat(parts[5]) || 0,
+            disk_total_gb: parseFloat(parts[6]) || 0,
+            load_avg_1m: parseFloat(la1) || 0,
+            load_avg_5m: parseFloat(la5) || 0,
+            load_avg_15m: parseFloat(la15) || 0,
+            uptime_seconds: parseInt(parts[8]) || 0,
+            top_process_name: parts[9] || '',
+            top_process_ram_mb: parseInt(parts[10]) || 0,
+            docker_container_count: parseInt(parts[11]) || 0,
+        };
+        res.json(data);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- HISTORICAL METRICS ---
+app.get('/api/metrics/:nodeId', async (req, res) => {
+    if (!useDB) return res.json([]);
+    const period = req.query.period || '1h';
+    const intervals = { '1h': '1 hour', '6h': '6 hours', '24h': '24 hours', '7d': '7 days' };
+    const interval = intervals[period] || '1 hour';
+    try {
+        const rows = await query(`
+            SELECT recorded_at, cpu_percent, ram_percent, disk_percent,
+                   load_avg_1m, load_avg_5m, load_avg_15m,
+                   ram_used_mb, ram_total_mb, docker_container_count
+            FROM vps_metrics
+            WHERE node_id = $1 AND recorded_at > NOW() - INTERVAL '${interval}'
+            ORDER BY recorded_at ASC
+        `, [req.params.nodeId]);
+        res.json(rows);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- METRICS SUMMARY (peaks, averages) ---
+app.get('/api/metrics/summary/:nodeId', async (req, res) => {
+    if (!useDB) return res.json({});
+    try {
+        const rows = await query(`
+            SELECT
+                AVG(cpu_percent) as avg_cpu, MAX(cpu_percent) as peak_cpu,
+                AVG(ram_percent) as avg_ram, MAX(ram_percent) as peak_ram,
+                MAX(disk_percent) as peak_disk,
+                MIN(recorded_at) as since
+            FROM vps_metrics
+            WHERE node_id = $1 AND recorded_at > NOW() - INTERVAL '24 hours'
+        `, [req.params.nodeId]);
+        res.json(rows[0] || {});
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- ALERTS: threshold breaches across all nodes ---
+app.get('/api/alerts', async (req, res) => {
+    if (!useDB) return res.json([]);
+    try {
+        const rows = await query(`
+            SELECT DISTINCT ON (m.node_id)
+                n.name as node_name, n.ip,
+                m.cpu_percent, m.ram_percent, m.disk_percent,
+                m.top_process_name, m.top_process_ram_mb,
+                m.load_avg_1m, m.recorded_at
+            FROM vps_metrics m
+            JOIN vps_nodes n ON n.id = m.node_id
+            WHERE m.recorded_at > NOW() - INTERVAL '2 minutes'
+            ORDER BY m.node_id, m.recorded_at DESC
+        `);
+        const alerts = [];
+        for (const r of rows) {
+            if (r.cpu_percent > 85) alerts.push({ node: r.node_name, type: 'cpu', value: r.cpu_percent, message: `CPU at ${r.cpu_percent.toFixed(1)}%` });
+            if (r.ram_percent > 90) alerts.push({ node: r.node_name, type: 'ram', value: r.ram_percent, message: `RAM at ${r.ram_percent.toFixed(1)}%` });
+            if (r.disk_percent > 90) alerts.push({ node: r.node_name, type: 'disk', value: r.disk_percent, message: `Disk at ${r.disk_percent.toFixed(1)}%` });
+        }
+        res.json(alerts);
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -373,6 +486,66 @@ app.post('/api/files/upload/:nodeId', upload.single('file'), async (req, res) =>
     } catch(e) { fs.unlinkSync(req.file.path); res.status(500).json({ error: e.message }); }
 });
 
+// --- METRICS POLLER (30-second background job) ---
+const METRICS_SCRIPT = [
+  'CPU=$(top -bn2 | grep "Cpu(s)" | tail -1 | sed \'s/.*, *\\([0-9.]*\\)%* id.*/\\1/\' | awk \'{print 100 - $1}\')',
+  'RAM_USED=$(free -m | awk \'NR==2{print $3}\')',
+  'RAM_TOTAL=$(free -m | awk \'NR==2{print $2}\')',
+  'RAM_PCT=$(free -m | awk \'NR==2{printf "%.1f", $3*100/$2}\')',
+  'DISK_PCT=$(df / | awk \'NR==2{print $5}\' | tr -d \'%\')',
+  'DISK_USED=$(df -BG / | awk \'NR==2{print $3}\' | tr -d \'G\')',
+  'DISK_TOTAL=$(df -BG / | awk \'NR==2{print $2}\' | tr -d \'G\')',
+  'LOAD=$(cat /proc/loadavg | awk \'{print $1, $2, $3}\')',
+  'UPTIME=$(cat /proc/uptime | awk \'{print int($1)}\')',
+  'TOP_PROC=$(ps aux --sort=-%mem | awk \'NR==2{print $11}\' | xargs -I{} basename {})',
+  'TOP_RAM=$(ps aux --sort=-%mem | awk \'NR==2{printf "%d", $6/1024}\')',
+  'DOCKER_COUNT=$(docker ps -q 2>/dev/null | wc -l)',
+  'echo "$CPU|$RAM_USED|$RAM_TOTAL|$RAM_PCT|$DISK_PCT|$DISK_USED|$DISK_TOTAL|$LOAD|$UPTIME|$TOP_PROC|$TOP_RAM|$DOCKER_COUNT"',
+].join('\n');
+
+async function collectNodeMetrics(node) {
+    try {
+        const ssh = new NodeSSH();
+        await ssh.connect({ host: node.ip, username: 'root', password: node.password, readyTimeout: 10000 });
+        const result = await ssh.execCommand(METRICS_SCRIPT, { cwd: '/root' });
+        ssh.dispose();
+        const parts = result.stdout.trim().split('|');
+        if (parts.length < 10) return;
+        const [la1, la5, la15] = (parts[7] || '0 0 0').split(' ');
+        await query(`
+            INSERT INTO vps_metrics 
+            (node_id, cpu_percent, ram_used_mb, ram_total_mb, ram_percent,
+             disk_percent, disk_used_gb, disk_total_gb,
+             load_avg_1m, load_avg_5m, load_avg_15m, uptime_seconds,
+             top_process_name, top_process_ram_mb, docker_container_count)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        `, [
+            node.id,
+            parseFloat(parts[0]) || 0,
+            parseInt(parts[1]) || 0, parseInt(parts[2]) || 0, parseFloat(parts[3]) || 0,
+            parseFloat(parts[4]) || 0, parseFloat(parts[5]) || 0, parseFloat(parts[6]) || 0,
+            parseFloat(la1) || 0, parseFloat(la5) || 0, parseFloat(la15) || 0,
+            parseInt(parts[8]) || 0, parts[9] || '', parseInt(parts[10]) || 0, parseInt(parts[11]) || 0,
+        ]);
+    } catch(e) {
+        // Silently fail — node may be temporarily unreachable
+        console.warn(`[Metrics] Could not collect from ${node.name} (${node.ip}): ${e.message}`);
+    }
+}
+
+async function collectAllNodeMetrics() {
+    if (!useDB) return;
+    try {
+        const nodes = await db.getNodes();
+        if (!Array.isArray(nodes) || nodes.length === 0) return;
+        await Promise.all(nodes.map(collectNodeMetrics));
+        // Cleanup: delete metrics older than 30 days
+        await query(`DELETE FROM vps_metrics WHERE recorded_at < NOW() - INTERVAL '30 days'`);
+    } catch(e) {
+        console.warn('[Metrics] Poller error:', e.message);
+    }
+}
+
 // --- SERVE FRONTEND ---
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 app.use((req, res) => {
@@ -385,5 +558,12 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, async () => {
     await checkDB();
     await initDB();
-    console.log(`V3 API (Postgres backend) running on port ${PORT}`);
+    // Start background metrics poller
+    if (useDB) {
+        console.log('📊 Starting VPS metrics poller (every 30s)...');
+        collectAllNodeMetrics(); // Run immediately on startup
+        setInterval(collectAllNodeMetrics, 30_000);
+    }
+    console.log(`V4 API (Real-Time Intelligence) running on port ${PORT}`);
 });
+

@@ -26,7 +26,8 @@ async function deploy() {
     console.log("Uploading backend files...");
     await ssh.putFiles([
         { local: path.join(__dirname, 'backend/server.js'), remote: '/opt/supabase-manager/backend/server.js' },
-        { local: path.join(__dirname, 'backend/package.json'), remote: '/opt/supabase-manager/backend/package.json' }
+        { local: path.join(__dirname, 'backend/package.json'), remote: '/opt/supabase-manager/backend/package.json' },
+        { local: path.join(__dirname, 'backend/ecosystem.config.js'), remote: '/opt/supabase-manager/backend/ecosystem.config.js' }
     ]);
 
     console.log("Uploading frontend dist...");
@@ -36,11 +37,13 @@ async function deploy() {
     const installRes = await ssh.execCommand('npm install', { cwd: '/opt/supabase-manager/backend' });
     if(installRes.stderr) console.log("NPM warning/error:", installRes.stderr);
 
-    console.log("Gracefully reloading server with PM2 (Zero-Downtime)...");
-    // Use cluster mode with 2 instances for true zero-downtime during reload
-    const pm2Res = await ssh.execCommand(`DATABASE_URL="${DB_URL}" pm2 reload supabase-manager || DATABASE_URL="${DB_URL}" pm2 start server.js --name "supabase-manager" -i 2`, { cwd: '/opt/supabase-manager/backend' });
+    console.log("Starting/reloading server with PM2 (Zero-Downtime)...");
+    const pm2Res = await ssh.execCommand(
+        'pm2 reload ecosystem.config.js --update-env 2>/dev/null || pm2 start ecosystem.config.js',
+        { cwd: '/opt/supabase-manager/backend' }
+    );
     await ssh.execCommand('pm2 save');
-    console.log(pm2Res.stdout);
+    console.log(pm2Res.stdout || pm2Res.stderr);
     
     // Setup ufw firewall
     await ssh.execCommand('ufw allow 4000/tcp');
