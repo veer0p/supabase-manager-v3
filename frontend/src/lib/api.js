@@ -1,16 +1,18 @@
 const API_BASE = import.meta.env.PROD ? '/api' : 'http://localhost:4000/api';
 
-const getHeaders = () => {
-    // For local testing, fallback to basic auth if needed, or if the user enabled it
+import { supabase } from './supabase';
+
+const getHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
     return {
-        'Authorization': 'Basic ' + btoa('admin:admin123'),
+        'Authorization': session ? `Bearer ${session.access_token}` : '',
         'Content-Type': 'application/json'
     };
 };
 
 export const apiFetch = async (path, options = {}) => {
     const isFormData = options.body instanceof FormData;
-    const headers = { ...getHeaders(), ...options.headers };
+    const headers = { ...(await getHeaders()), ...options.headers };
     if (isFormData) delete headers['Content-Type']; // Let browser set boundary
 
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });

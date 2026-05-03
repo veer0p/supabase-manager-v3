@@ -20,7 +20,7 @@ export default function Select({ options, value, onChange, placeholder = "Select
     <div className="relative flex-1" ref={ref}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between bg-black/50 border border-gray-700 rounded-lg px-4 py-3 text-white cursor-pointer hover:border-gray-600 transition"
+        className="flex items-center justify-between bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-white cursor-pointer hover:border-white/10 focus:border-supa-green/50 transition-all shadow-inner group"
       >
         <span className={selectedOption ? "text-white" : "text-gray-500"}>
           {selectedOption ? selectedOption.label : placeholder}
@@ -31,24 +31,28 @@ export default function Select({ options, value, onChange, placeholder = "Select
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.15 }}
-            className="absolute z-50 w-full mt-2 bg-[#1a1a1a] border border-gray-800 rounded-xl shadow-2xl overflow-hidden"
+            initial={{ opacity: 0, y: -10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.98 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute z-[60] w-full mt-2 bg-[#0a0a0c]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden"
           >
-            <div className="max-h-60 overflow-y-auto p-1">
+            <div className="max-h-60 overflow-y-auto p-2 space-y-1">
               {options.length === 0 ? (
-                <div className="p-3 text-sm text-gray-500 text-center">No options available</div>
+                <div className="p-4 text-[10px] font-orbitron uppercase tracking-widest text-gray-600 text-center">No nodes detected</div>
               ) : (
                 options.map((option) => (
                   <div
                     key={option.value}
                     onClick={() => { onChange(option.value); setIsOpen(false); }}
-                    className="flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10 text-sm text-gray-200 transition"
+                    className={`flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all ${
+                        value === option.value 
+                        ? 'bg-supa-green/10 text-supa-green border border-supa-green/20' 
+                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    }`}
                   >
-                    {option.label}
-                    {value === option.value && <Check size={16} className="text-supa-green" />}
+                    <span className="text-xs font-bold uppercase tracking-wider">{option.label}</span>
+                    {value === option.value && <Check size={14} className="text-supa-green" />}
                   </div>
                 ))
               )}

@@ -3,8 +3,16 @@
     "nodeId": "306dcf92-b417-4660-95fc-b8f6add9f666",
     "domain": "test.veer-vps.duckdns.org",
     "studio_domain": "test-studio.veer-vps.duckdns.org",
-    "password": "IQWmUVmDZwQi",
+    "password": "NRLU7QsDvVEZ",
     "pgPassword": "nL4KGW67dwh5",
+    "status": "delete_error"
+  },
+  "manager": {
+    "nodeId": "dce10f84-50e9-4219-a295-0b1bf93f8079",
+    "domain": "manager.veer-vps.duckdns.org",
+    "studio_domain": "manager-studio.veer-vps.duckdns.org",
+    "password": "fJsEWlzJc3tH",
+    "pgPassword": "kpxyLfeIymc2",
     "status": "error"
   }
 }

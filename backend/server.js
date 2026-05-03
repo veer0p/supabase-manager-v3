@@ -38,7 +38,9 @@ async function initDB() {
             CREATE TABLE IF NOT EXISTS instances (
                 project_name TEXT PRIMARY KEY, node_id UUID,
                 domain TEXT NOT NULL, studio_domain TEXT NOT NULL, password TEXT NOT NULL,
-                pg_password TEXT, status TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+                pg_password TEXT, anon_key TEXT, service_role_key TEXT,
+                status TEXT NOT NULL, is_protected BOOLEAN DEFAULT false,
+                created_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE TABLE IF NOT EXISTS config (
                 id INTEGER PRIMARY KEY DEFAULT 1, auth_enabled BOOLEAN DEFAULT true, admin_pass TEXT DEFAULT 'admin123'
@@ -124,7 +126,9 @@ const db = {
         return rows.reduce((acc, r) => {
             acc[r.project_name] = {
                 nodeId: r.node_id, domain: r.domain, studio_domain: r.studio_domain,
-                password: r.password, pgPassword: r.pg_password, status: r.status
+                password: r.password, pgPassword: r.pg_password, 
+                anonKey: r.anon_key, serviceRoleKey: r.service_role_key,
+                status: r.status, isProtected: r.is_protected
             };
             return acc;
         }, {});
@@ -137,12 +141,26 @@ const db = {
             return;
         }
         await query(`
-            INSERT INTO instances (project_name, node_id, domain, studio_domain, password, pg_password, status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            INSERT INTO instances (project_name, node_id, domain, studio_domain, password, pg_password, anon_key, service_role_key, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             ON CONFLICT (project_name) DO UPDATE SET 
                 node_id=EXCLUDED.node_id, domain=EXCLUDED.domain, studio_domain=EXCLUDED.studio_domain,
-                password=EXCLUDED.password, pg_password=EXCLUDED.pg_password, status=EXCLUDED.status
-        `, [name, data.nodeId, data.domain, data.studio_domain, data.password, data.pgPassword, data.status]);
+                password=EXCLUDED.password, pg_password=EXCLUDED.pg_password, 
+                anon_key=EXCLUDED.anon_key, service_role_key=EXCLUDED.service_role_key,
+                status=EXCLUDED.status
+        `, [name, data.nodeId, data.domain, data.studio_domain, data.password, data.pgPassword, data.anonKey || '', data.serviceRoleKey || '', data.status]);
+    },
+    updateInstanceKeys: async (name, anonKey, serviceRoleKey) => {
+        if (!useDB) {
+            const instances = getJSONDB(INSTANCES_FILE);
+            if(instances[name]) { 
+                instances[name].anonKey = anonKey; 
+                instances[name].serviceRoleKey = serviceRoleKey; 
+                saveJSONDB(INSTANCES_FILE, instances); 
+            }
+            return;
+        }
+        await query('UPDATE instances SET anon_key=$1, service_role_key=$2 WHERE project_name=$3', [anonKey, serviceRoleKey, name]);
     },
     updateInstanceStatus: async (name, status) => {
         if (!useDB) {
@@ -177,18 +195,49 @@ const db = {
     setConfig: async (config) => {
         if (!useDB) { saveJSONDB(CONFIG_FILE, { ...getJSONDB(CONFIG_FILE), ...config }); return; }
         await query('UPDATE config SET auth_enabled=$1, admin_pass=$2 WHERE id=1', [config.auth_enabled, config.admin_pass]);
+    },
+    clearStaleDeployments: async () => {
+        if (!useDB) {
+            const instances = getJSONDB(INSTANCES_FILE);
+            let changed = false;
+            Object.keys(instances).forEach(name => {
+                if (instances[name].status === 'deploying' || instances[name].status === 'deleting') {
+                    instances[name].status = 'error';
+                    changed = true;
+                }
+            });
+            if (changed) saveJSONDB(INSTANCES_FILE, instances);
+            return;
+        }
+        await query("UPDATE instances SET status='error' WHERE status IN ('deploying', 'deleting')");
     }
 };
+
+// --- Supabase Auth Configuration ---
+const { createClient } = require('@supabase/supabase-js');
+const SUPABASE_URL = 'https://manager.veer-vps.duckdns.org';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // --- Auth Middleware ---
 const authMiddleware = async (req, res, next) => {
     const config = await db.getConfig();
     if (!config.auth_enabled) return next();
-    const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-    const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
-    if (login && password && login === 'admin' && password === config.admin_pass) return next();
-    res.set('WWW-Authenticate', 'Basic realm="401"');
-    res.status(401).send('Authentication required.');
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+        return res.status(401).json({ error: 'Invalid or expired session' });
+    }
+
+    req.user = user;
+    next();
 };
 
 app.use('/api', authMiddleware);
@@ -205,10 +254,31 @@ async function runSSH(nodeId, script, logKey = null) {
     if (logKey) global.deploymentLogs[logKey] = '';
     const ssh = new NodeSSH();
     await ssh.connect({ host: node.ip, username: 'root', password: node.password, readyTimeout: 20000 });
+    
+    // Set a 10-minute timeout for the entire command to prevent hanging
     const result = await ssh.execCommand(script, {
         cwd: '/root',
-        onStdout: (chunk) => { const o = chunk.toString(); console.log(o); if (logKey) global.deploymentLogs[logKey] += o; },
-        onStderr: (chunk) => { const e = chunk.toString(); console.error(e); if (logKey) global.deploymentLogs[logKey] += e; },
+        onStdout: (chunk) => { 
+            const o = chunk.toString(); 
+            console.log(o); 
+            if (logKey) {
+                global.deploymentLogs[logKey] += o;
+                // Cap logs at ~50KB to prevent memory issues
+                if (global.deploymentLogs[logKey].length > 50000) {
+                    global.deploymentLogs[logKey] = global.deploymentLogs[logKey].slice(-50000);
+                }
+            }
+        },
+        onStderr: (chunk) => { 
+            const e = chunk.toString(); 
+            console.error(e); 
+            if (logKey) {
+                global.deploymentLogs[logKey] += e;
+                if (global.deploymentLogs[logKey].length > 50000) {
+                    global.deploymentLogs[logKey] = global.deploymentLogs[logKey].slice(-50000);
+                }
+            }
+        },
     });
     ssh.dispose();
     if (result.code !== 0) throw new Error(`SSH failed: ${result.stderr}`);
@@ -277,18 +347,28 @@ if [ ! -d "$PROJ_DIR" ]; then
 fi
 cd "$PROJ_DIR/docker"
 cp -n .env.example .env || true
-sed -i "s|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://${domain}|" .env
-sed -i "s|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=${password}|" .env
-sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pgPassword}|" .env
-sed -i "s|^SITE_URL=.*|SITE_URL=https://${studio_domain}|" .env
-# Assign unique ports to avoid conflicts (using port offset based on hash)
-PORT_OFFSET=$(echo "${project_name}" | cksum | awk '{print $1 % 100}')
-HTTP_PORT=$((9000 + PORT_OFFSET * 2))
-STUDIO_PORT=$((9001 + PORT_OFFSET * 2))
-PG_PORT=$((5440 + PORT_OFFSET))
-sed -i "s/\\$\\{KONG_HTTP_PORT:-8000\\}:8000/$HTTP_PORT:8000/g" docker-compose.yml || true
-sed -i "s/3000:3000/$STUDIO_PORT:3000/g" docker-compose.yml || true
-sed -i "s/5432:5432/$PG_PORT:5432/g" docker-compose.yml || true
+    sed -i "s|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://${domain}|" .env
+    sed -i "s|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=${password}|" .env
+    sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pgPassword}|" .env
+    sed -i "s|^SITE_URL=.*|SITE_URL=https://${studio_domain}|" .env
+    
+    # Assign unique ports to avoid conflicts (using port offset based on hash)
+    PORT_OFFSET=$(echo "${project_name}" | cksum | awk '{print $1 % 100}')
+    HTTP_PORT=$((9000 + PORT_OFFSET * 2))
+    STUDIO_PORT=$((9001 + PORT_OFFSET * 2))
+    PG_PORT=$((5440 + PORT_OFFSET))
+    POOL_PORT=$((6543 + PORT_OFFSET))
+    
+    {
+      echo "COMPOSE_PROJECT_NAME=supabase_${project_name}"
+      echo "POSTGRES_PORT=${PG_PORT}"
+      echo "KONG_HTTP_PORT=${HTTP_PORT}"
+      echo "KONG_HTTPS_PORT=${STUDIO_PORT}"
+      echo "POOLER_PROXY_PORT_TRANSACTION=${POOL_PORT}"
+    } >> .env
+
+    # Remove hardcoded container names to allow multiple instances on one host
+    sed -i "/container_name:/d" docker-compose.yml
 grep -q "${domain}" /etc/caddy/Caddyfile || cat >> /etc/caddy/Caddyfile <<CADDYEOF
 
 ${domain} {
@@ -303,10 +383,30 @@ CADDYEOF
 systemctl restart caddy
 docker compose pull
 docker compose up -d
+echo "---SUPABASE_KEYS_START---"
+grep "^ANON_KEY=" .env || true
+grep "^SERVICE_ROLE_KEY=" .env || true
+echo "---SUPABASE_KEYS_END---"
 ufw allow 80/tcp || true && ufw allow 443/tcp || true && ufw allow 22/tcp || true && ufw allow 4000/tcp || true && ufw --force enable || true
 `;
     try {
-        await runSSH(nodeId, script, project_name);
+        const result = await runSSH(nodeId, script, project_name);
+        
+        // Extract keys from result.stdout
+        let anonKey = '';
+        let serviceRoleKey = '';
+        const lines = result.stdout.split('\n');
+        let inKeys = false;
+        lines.forEach(line => {
+            if (line.includes('---SUPABASE_KEYS_START---')) inKeys = true;
+            else if (line.includes('---SUPABASE_KEYS_END---')) inKeys = false;
+            else if (inKeys) {
+                if (line.startsWith('ANON_KEY=')) anonKey = line.split('=')[1].trim();
+                if (line.startsWith('SERVICE_ROLE_KEY=')) serviceRoleKey = line.split('=')[1].trim();
+            }
+        });
+
+        await db.updateInstanceKeys(project_name, anonKey, serviceRoleKey);
         await db.updateInstanceStatus(project_name, 'active');
     } catch (e) {
         console.error('Deploy error:', e);
@@ -316,10 +416,12 @@ ufw allow 80/tcp || true && ufw allow 443/tcp || true && ufw allow 22/tcp || tru
 
 app.post('/api/delete', async (req, res) => {
     const { project_name } = req.body;
-    if (project_name === 'manager-db') return res.status(403).json({ error: 'System instance cannot be deleted.' });
     const instances = await db.getInstances();
-    if (!instances[project_name]) return res.status(404).json({ error: 'Instance not found' });
-    const nodeId = instances[project_name].nodeId;
+    const inst = instances[project_name];
+    if (!inst) return res.status(404).json({ error: 'Instance not found' });
+    if (inst.isProtected) return res.status(403).json({ error: 'This instance is protected and cannot be deleted.' });
+    
+    const nodeId = inst.nodeId;
     await db.updateInstanceStatus(project_name, 'deleting');
     res.json({ success: true });
     try {
@@ -495,7 +597,28 @@ app.get('/api/alerts', async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- FILE BROWSER ---
+// --- LOCAL PC FILE BROWSER ---
+app.get('/api/local/files', async (req, res) => {
+    const os = require('os');
+    const dir = req.query.path || os.homedir();
+    try {
+        if (!fs.existsSync(dir)) {
+            return res.status(404).json({ error: 'Directory not found' });
+        }
+        const items = fs.readdirSync(dir);
+        const files = items.map(item => {
+            try {
+                const stat = fs.statSync(path.join(dir, item));
+                return { name: item, size: stat.size, isDirectory: stat.isDirectory() };
+            } catch (e) {
+                return null;
+            }
+        }).filter(Boolean);
+        res.json({ path: dir, files });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- VPS FILE BROWSER ---
 app.get('/api/files/:nodeId', async (req, res) => {
     const dir = req.query.path || '/';
     try {
@@ -523,6 +646,36 @@ app.post('/api/files/upload/:nodeId', upload.single('file'), async (req, res) =>
         fs.unlinkSync(req.file.path);
         res.json({ success: true });
     } catch(e) { fs.unlinkSync(req.file.path); res.status(500).json({ error: e.message }); }
+});
+
+// --- HIGH SPEED TRANSFER TUNNEL ---
+app.post('/api/tunnel/transfer', async (req, res) => {
+    const { nodeId, direction, localPath, remotePath } = req.body;
+    // direction: 'local_to_vps' or 'vps_to_local'
+    if (!nodeId || !localPath || !remotePath) return res.status(400).json({ error: 'Missing paths or node' });
+
+    const nodes = await db.getNodes();
+    const node = (Array.isArray(nodes) ? nodes : []).find(n => n.id === nodeId);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+
+    try {
+        const ssh = new NodeSSH();
+        await ssh.connect({ host: node.ip, username: 'root', password: node.password });
+        
+        if (direction === 'local_to_vps') {
+            await ssh.putFile(localPath, remotePath);
+        } else if (direction === 'vps_to_local') {
+            await ssh.getFile(localPath, remotePath);
+        } else {
+            ssh.dispose();
+            return res.status(400).json({ error: 'Invalid direction' });
+        }
+        
+        ssh.dispose();
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // --- METRICS POLLER (30-second background job) ---
@@ -585,6 +738,11 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, async () => {
     await checkDB();
     await initDB();
+    
+    // Clear any statuses stuck from a previous crash
+    console.log('🧹 Cleaning up stale deployment statuses...');
+    await db.clearStaleDeployments();
+
     // Start background metrics poller
     if (useDB) {
         console.log('📊 Starting VPS metrics poller (every 30s)...');

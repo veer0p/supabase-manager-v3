@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Terminal, AlertTriangle } from 'lucide-react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { Server, Database, Folder, Settings, LayoutDashboard, Menu, X, Terminal, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from './lib/api';
+import { supabase } from './lib/supabase';
 
 import Overview from './pages/Overview';
 import Nodes from './pages/Nodes';
 import Instances from './pages/Instances';
 import Files from './pages/Files';
 import SettingsPage from './pages/Settings';
-import { NotificationProvider } from './NotificationContext';
+import Login from './pages/Login';
+import { NotificationProvider, useNotification } from './NotificationContext';
+import { DiscBrakeLoader } from './components/DiscBrakeLoader';
 
-function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
+
+function Sidebar({ mobileOpen, setMobileOpen, alertCount, onLogout }) {
   const location = useLocation();
   const links = [
     { name: 'Overview', path: '/', icon: LayoutDashboard },
@@ -23,8 +27,8 @@ function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
 
   return (
     <>
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0a0a0c] bg-[radial-gradient(circle_at_top,_#1a1a2e_0%,_transparent_100%)] border-r border-white/5 transform transition-transform duration-300 ease-in-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 shadow-[4px_0_24px_rgba(0,0,0,0.5)]`}>
-        <div className="flex items-center justify-between h-16 px-6 border-b border-white/10 bg-black/40">
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0a0a0c] bg-[radial-gradient(circle_at_top,_#1a1a2e_0%,_transparent_100%)] border-r border-white/5 transform transition-transform duration-300 ease-in-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 shadow-[4px_0_24px_rgba(0,0,0,0.5)] flex flex-col`}>
+        <div className="flex items-center justify-between h-16 px-6 border-b border-white/10 bg-black/40 shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-[#3ecf8e] flex items-center justify-center shadow-[0_0_15px_#3ecf8e80]">
               <Terminal size={18} className="text-black" />
@@ -36,7 +40,7 @@ function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
           </button>
         </div>
         
-        <nav className="p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {links.map((link) => {
             const isActive = location.pathname === link.path;
             const Icon = link.icon;
@@ -54,6 +58,13 @@ function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
             );
           })}
         </nav>
+
+        <div className="p-4 border-t border-white/5 bg-black/20">
+          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-500/70 hover:text-red-400 hover:bg-red-500/5 rounded-xl transition-all duration-200 uppercase tracking-widest font-orbitron text-[10px] font-black cursor-pointer">
+            <LogOut size={16} />
+            <span>Sign Out</span>
+          </button>
+        </div>
       </div>
       {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setMobileOpen(false)} />}
     </>
@@ -61,51 +72,95 @@ function Sidebar({ mobileOpen, setMobileOpen, alertCount }) {
 }
 
 function App() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
+    // Initial session check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
     const fetchAlerts = () => apiFetch('/alerts').then(a => setAlertCount(a.length)).catch(() => {});
     fetchAlerts();
     const int = setInterval(fetchAlerts, 15000);
     return () => clearInterval(int);
-  }, []);
+  }, [session]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+  };
+
+  const handleSplashComplete = () => {
+    setShowSplash(false);
+  };
+
+  if (showSplash) {
+    return (
+      <NotificationProvider>
+        <div className="h-screen bg-[#050505] flex items-center justify-center">
+          <DiscBrakeLoader onReadyToExit={handleSplashComplete} dataReady={!authLoading} />
+        </div>
+      </NotificationProvider>
+    );
+  }
+
+  if (authLoading) return null;
 
   return (
     <Router>
-        <NotificationProvider>
-        <div className="min-h-screen bg-[#050505] text-gray-100 flex selection:bg-supa-green/30 selection:text-supa-green">
-          <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} alertCount={alertCount} />
-        
-        <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden relative">
-          <header className="h-16 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center justify-between px-6 z-30">
-            <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setMobileOpen(true)}>
-              <Menu size={20} />
-            </button>
-            <div className="flex-1 flex justify-end items-center gap-4">
-              <div className="text-[10px] font-orbitron font-bold text-gray-500 flex items-center gap-2 uppercase tracking-widest border border-white/10 px-3 py-1.5 rounded bg-black/40 shadow-inner">
-                <span className="w-2 h-2 rounded-full bg-[#3ecf8e] shadow-[0_0_8px_#3ecf8e]"></span> TELEMETRY ONLINE
-              </div>
-            </div>
-          </header>
+      <NotificationProvider>
+        {!session ? (
+          <Login onLogin={(s) => setSession(s)} />
+        ) : (
+          <div className="min-h-screen bg-[#050505] text-gray-100 flex selection:bg-supa-green/30 selection:text-supa-green">
+            <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} alertCount={alertCount} onLogout={handleLogout} />
           
-          <main className="flex-1 overflow-y-auto p-6 md:p-10 relative">
-            {/* Ambient Background Glow */}
-            <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-purple-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
-            <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
-            
-            <AnimatePresence mode="wait">
-              <Routes>
-                <Route path="/" element={<Overview />} />
-                <Route path="/nodes" element={<Nodes />} />
-                <Route path="/instances" element={<Instances />} />
-                <Route path="/files" element={<Files />} />
-                <Route path="/settings" element={<SettingsPage />} />
-              </Routes>
-            </AnimatePresence>
-          </main>
-        </div>
-      </div>
+            <div className="flex-1 md:ml-64 flex flex-col h-screen overflow-hidden relative">
+              <header className="h-16 border-b border-white/5 bg-black/20 backdrop-blur-md flex items-center justify-between px-6 z-30">
+                <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setMobileOpen(true)}>
+                  <Menu size={20} />
+                </button>
+                <div className="flex-1 flex justify-end items-center gap-4">
+                  <div className="text-[10px] font-orbitron font-bold text-gray-500 flex items-center gap-2 uppercase tracking-widest border border-white/10 px-3 py-1.5 rounded bg-black/40 shadow-inner">
+                    <span className="w-2 h-2 rounded-full bg-[#3ecf8e] shadow-[0_0_8px_#3ecf8e]"></span> TELEMETRY ONLINE
+                  </div>
+                </div>
+              </header>
+              
+              <main className="flex-1 overflow-y-auto p-6 md:p-10 relative">
+                {/* Ambient Background Glow */}
+                <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-purple-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+                <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none -z-10" />
+                
+                <AnimatePresence mode="wait">
+                  <Routes>
+                    <Route path="/" element={<Overview />} />
+                    <Route path="/nodes" element={<Nodes />} />
+                    <Route path="/instances" element={<Instances />} />
+                    <Route path="/files" element={<Files />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </AnimatePresence>
+              </main>
+            </div>
+          </div>
+        )}
       </NotificationProvider>
     </Router>
   );

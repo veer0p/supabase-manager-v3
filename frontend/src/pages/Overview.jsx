@@ -1,4 +1,3 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, animate, useMotionValue, useTransform, useAnimationFrame } from 'framer-motion';
 import {
@@ -7,244 +6,130 @@ import {
   RefreshCw, ChevronDown
 } from 'lucide-react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, RadialBarChart, RadialBar
+  AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer
 } from 'recharts';
 import { apiFetch } from '../lib/api';
 import Select from '../components/Select';
+import { Skeleton, CardSkeleton } from '../components/Skeleton';
+import { useState, useEffect, useRef } from 'react';
 
 // ----------- Helpers -----------
 
 function fmt(n, decimals = 1) { return (parseFloat(n) || 0).toFixed(decimals); }
+
+function GraphSkeleton() {
+  return (
+    <div className="w-full h-full relative overflow-hidden rounded-xl bg-black/40 border border-white/5 shadow-inner p-4 flex items-end justify-between gap-1">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 pointer-events-none" />
+      {Array.from({ length: 24 }).map((_, i) => (
+        <motion.div key={i} className="w-full bg-[#3ecf8e15] rounded-t-sm"
+          initial={{ height: '10%' }}
+          animate={{ height: `${10 + Math.random() * 40}%` }}
+          transition={{
+            duration: 2 + Math.random(),
+            repeat: Infinity,
+            repeatType: 'reverse',
+            ease: 'easeInOut'
+          }}
+        />
+      ))}
+      <motion.div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg]"
+        animate={{ x: ['-100%', '200%'] }}
+        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+      />
+    </div>
+  );
+}
 
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   if (d > 0) return `${d}d ${h}h`;
-  return `${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
-// Physics-driven Disc Brake Loader
-function DiscBrakeLoader({ onReadyToExit, dataReady }) {
-  const rotation = useMotionValue(0);
-  const velocity = useMotionValue(8); // Reduced top speed for smoothness
-  const caliperX = useMotionValue(0); // Explicit motion value for the caliper
-  const [phase, setPhase] = useState('constant'); 
-  const dataReadyRef = useRef(dataReady);
-  
-  useEffect(() => {
-    dataReadyRef.current = dataReady;
-  }, [dataReady]);
-  
-  // High-performance rotation update
-  useAnimationFrame((_, delta) => {
-    rotation.set(rotation.get() + (velocity.get() * (delta / 16.67)));
-  });
+function getThreshold(val, warn = 50, crit = 80) {
+  if (val >= crit) return { color: '#ef4444', label: 'Critical', bg: 'bg-red-500/10 border-red-500/30' };
+  if (val >= warn) return { color: '#f59e0b', label: 'Warning', bg: 'bg-amber-500/10 border-amber-500/30' };
+  return { color: '#3ecf8e', label: 'Optimal', bg: 'bg-supa-green/5 border-[#3ecf8e]/30' };
+}
 
-  useEffect(() => {
-    let mounted = true;
-    const runLoop = async () => {
-      // First run starts at constant speed
-      while (mounted) {
-        // Phase 1: High Speed Run (Constant)
-        setPhase('constant');
-        await new Promise(r => setTimeout(r, 800));
-        
-        // Phase 2: The Brake Clamp (Braking)
-        setPhase('braking');
-        animate(caliperX, -2, { duration: 0.15 }); // Fast clamp action
-        await animate(velocity, 0, { duration: 1.2, ease: [0.22, 1, 0.36, 1] });
-        
-        setPhase('stopped');
-        animate(caliperX, 0, { duration: 0.3, ease: "easeOut" }); // Smooth release
-        if (dataReadyRef.current) {
-          setTimeout(onReadyToExit, 400);
-          break;
-        }
-        
-        await new Promise(r => setTimeout(r, 800));
+// ----------- Components -----------
 
-        // Phase 3: Spin Up (Acceleration) for next loop
-        setPhase('accelerating');
-        await animate(velocity, 8, { duration: 1.5, ease: "easeIn" });
-      }
-    };
-    runLoop();
-    return () => { mounted = false; };
-  }, [onReadyToExit]); // Removed dataReady from dependencies to prevent loop restart
-
-  const heatOpacity = useTransform(velocity, [0, 15, 25], [0.1, 0.3, 0.6]);
-
+function ApexStatCard({ icon: Icon, label, value, sub, color, loading, animate: pulse }) {
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/60 backdrop-blur-2xl overflow-hidden">
-      <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_#ffffff11_0%,_transparent_70%)]" />
-      <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] rounded-full bg-white/5 blur-[120px] pointer-events-none" />
-      <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] rounded-full bg-white/5 blur-[120px] pointer-events-none" />
-      
-      <div className="relative w-96 h-96 flex items-center justify-center">
-        {/* Dynamic Heat Glow */}
-        <motion.div
-          style={{ opacity: heatOpacity, scale: useTransform(velocity, [0, 25], [0.8, 1.2]) }}
-          className="absolute w-64 h-64 rounded-full bg-red-600/40 blur-[60px]"
-        />
-
-        {/* The Spinning Rotor */}
-        <motion.div 
-          style={{ rotate: rotation, willChange: "transform", translateZ: 0 }}
-          className="relative z-10"
-        >
-          <svg width="280" height="280" viewBox="0 0 240 240">
-            <defs>
-              <radialGradient id="rotorGrad" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#1a1a1a" />
-                <stop offset="80%" stopColor="#2a2a2a" />
-                <stop offset="100%" stopColor="#0a0a0a" />
-              </radialGradient>
-            </defs>
-            <circle cx="120" cy="120" r="105" fill="url(#rotorGrad)" stroke="#333" strokeWidth="1" />
-            {[...Array(18)].map((_, i) => (
-              <rect key={i} x="118" y="30" width="4" height="20" rx="2" fill="#000" opacity="0.8" transform={`rotate(${i * 20}, 120, 120)`} />
-            ))}
-            {[...Array(36)].map((_, i) => (
-              <circle key={i} cx="120" cy="65" r="2.5" fill="#000" opacity="0.9" transform={`rotate(${i * 10}, 120, 120)`} />
-            ))}
-            <circle cx="120" cy="120" r="45" fill="#111" stroke="#333" strokeWidth="2" />
-            {[...Array(5)].map((_, i) => (
-              <circle key={i} cx="120" cy="95" r="5" fill="#2a2a2a" stroke="#444" strokeWidth="1" transform={`rotate(${i * 72}, 120, 120)`} />
-            ))}
-            <circle cx="120" cy="120" r="12" fill="#000" stroke="#222" strokeWidth="1" />
-          </svg>
-        </motion.div>
-        
-        {/* The Performance Caliper */}
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 z-20">
-          <motion.div style={{ x: caliperX }} className="relative">
-            <svg width="110" height="210" viewBox="0 0 110 210" className="drop-shadow-[0_0_30px_rgba(239,68,68,0.6)]">
-              <path 
-                d="M5,15 L55,20 C80,20 95,45 95,100 C95,155 80,180 55,180 L5,185 L0,165 L15,165 C25,165 35,145 35,100 C35,55 25,35 15,35 L0,35 Z" 
-                fill="#ef4444" 
-                stroke="#991b1b" 
-                strokeWidth="3.5" 
-                strokeLinejoin="round" 
-              />
-              <path d="M55,25 C75,25 88,45 88,100 C88,155 75,175 55,175" fill="none" stroke="#ff6666" strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
-              <circle cx="26" cy="65" r="10" fill="#7f1d1d" opacity="0.6" />
-              <circle cx="26" cy="100" r="10" fill="#7f1d1d" opacity="0.6" />
-              <circle cx="26" cy="135" r="10" fill="#7f1d1d" opacity="0.6" />
-              <text x="72" y="100" transform="rotate(90, 72, 100)" fill="white" fontSize="18" fontWeight="950" fontFamily="Orbitron" letterSpacing="4" textAnchor="middle" dominantBaseline="middle" opacity="1" style={{ filter: 'drop-shadow(0 0 5px rgba(255,255,255,0.8))' }}>APEX</text>
-              <circle cx="78" cy="45" r="3" fill="#111" />
-              <circle cx="78" cy="155" r="3" fill="#111" />
-            </svg>
-          </motion.div>
-        </div>
+    <motion.div whileHover={{ y: -4 }} className="glass p-5 rounded-3xl border border-white/5 shadow-2xl relative overflow-hidden transition-all duration-300 group">
+      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+        <Icon size={64} style={{ color }} />
       </div>
-      
-      <div className="mt-12 flex flex-col items-center gap-6">
-        <div className="text-center">
-          <motion.h2 
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ repeat: Infinity, duration: 2 }}
-            className="font-orbitron text-3xl font-black tracking-[0.5em] text-white uppercase mb-2 drop-shadow-[0_0_15px_#3ecf8e]"
-          >
-            Apex Telemetry
-          </motion.h2>
-          <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
-            <motion.div 
-              animate={{ x: ['-100%', '100%'] }} 
-              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }} 
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-[#3ecf8e] to-transparent shadow-[0_0_10px_#3ecf8e]" 
-            />
+      <div className="relative z-10">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2.5 rounded-xl border border-white/10 shadow-inner" style={{ background: `${color}15` }}>
+            <Icon size={18} style={{ color }} />
+          </div>
+          <span className="text-[10px] font-orbitron font-bold tracking-widest text-gray-500 uppercase">{label}</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          {loading ? (
+            <Skeleton className="h-8 w-24 rounded-lg" />
+          ) : (
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black font-orbitron tracking-tight text-white drop-shadow-md">
+                {value}
+              </span>
+              {pulse && <div className="w-2 h-2 rounded-full animate-ping" style={{ backgroundColor: color }} />}
+            </div>
+          )}
+          <div className="flex items-center gap-2 mt-2">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }} />
+            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">{sub}</span>
           </div>
         </div>
-        
-        <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10 backdrop-blur-sm">
-          <Activity size={14} className="text-[#3ecf8e] animate-pulse" />
-          <span className="text-[10px] font-mono text-gray-400 tracking-[0.2em] uppercase">Synchronizing Systems...</span>
-        </div>
       </div>
-
-    </div>
-  );
-}
-
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function getThreshold(value, warn = 70, crit = 90) {
-  if (value >= crit) return { color: '#ef4444', label: 'Critical', bg: 'bg-red-500/10 border-red-500/20' };
-  if (value >= warn) return { color: '#f59e0b', label: 'Warning', bg: 'bg-amber-500/10 border-amber-500/20' };
-  return { color: '#3ecf8e', label: 'Healthy', bg: 'bg-supa-green/10 border-supa-green/20' };
-}
-
-// ----------- Sub-components -----------
-
-function StatCard({ icon: Icon, label, value, sub, color = '#3ecf8e', animate = false, loading = false }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -2, transition: { duration: 0.15 } }}
-      className="glass p-5 rounded-xl border border-white/5 relative overflow-hidden group shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)]"
-    >
-      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{ background: `radial-gradient(ellipse at 80% 20%, ${color}15 0%, transparent 70%)` }} />
-      <div className="flex items-start justify-between mb-4">
-        <div className="p-2 rounded border border-white/5 shadow-inner" style={{ background: `${color}10`, boxShadow: `inset 0 0 10px ${color}15` }}>
-          <Icon size={18} style={{ color }} />
-        </div>
-        {animate && <span className="flex h-2 w-2"><span className="animate-ping absolute inline-flex h-2 w-2 rounded-sm opacity-75" style={{ background: color }} /><span className="relative inline-flex rounded-sm h-2 w-2 shadow-[0_0_8px_currentColor]" style={{ background: color }} /></span>}
-      </div>
-      <p className="text-gray-500 text-[10px] font-orbitron uppercase tracking-widest font-bold mb-1">{label}</p>
-      {loading ? (
-        <div className="h-8 w-16 bg-white/5 rounded animate-pulse" />
-      ) : (
-        <p className="text-3xl font-bold font-orbitron text-white tracking-wider" style={{ textShadow: `0 0 10px ${color}20` }}>{value}</p>
-      )}
-      {sub && <p className="text-[10px] text-gray-500 mt-2 tracking-wide uppercase">{sub}</p>}
     </motion.div>
   );
 }
 
-
-
-// Tachometer for CPU (RPM style)
-function Tachometer({ value, color, isReady }) {
+function Tachometer({ value, color }) {
   const mv = useMotionValue(0);
-  const isInitial = useRef(true);
-  
+  const [isSequenceDone, setIsSequenceDone] = useState(false);
+
   useEffect(() => {
-    if (isReady && isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(mv, [0, 100, 0, value], {
-        duration: 2.8,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut"
-      });
-      return controls.stop;
-    } else if (isReady && !isInitial.current) {
-      const controls = animate(mv, value, {
-        duration: 0.8,
-        ease: "easeOut"
-      });
-      return controls.stop;
+    let controls;
+    const runSequence = async () => {
+      controls = animate(mv, 100, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      controls = animate(mv, 0, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      setIsSequenceDone(true);
+    };
+    runSequence();
+    return () => controls?.stop();
+  }, [mv]);
+
+  useEffect(() => {
+    if (isSequenceDone && value !== undefined) {
+      const controls = animate(mv, value, { duration: 0.8, ease: "easeOut" });
+      return () => controls?.stop();
     }
-  }, [value, mv, isReady]);
+  }, [value, isSequenceDone, mv]);
 
   const R = 54; const cx = 70; const cy = 70;
-  const sweep = 240; 
+  const sweep = 240;
   const startAngle = 210;
   const toRad = (deg) => (deg * Math.PI) / 180;
   const arcX = (a) => cx + R * Math.cos(toRad(startAngle - a));
   const arcY = (a) => cy - R * Math.sin(toRad(startAngle - a));
-  
+
   const trackPath = `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 1 1 ${arcX(sweep)} ${arcY(sweep)}`;
   const redlinePath = `M ${arcX(sweep * 0.85)} ${arcY(sweep * 0.85)} A ${R} ${R} 0 0 1 ${arcX(sweep)} ${arcY(sweep)}`;
-  
+
   const fillSweep = useTransform(mv, v => (v / 100) * sweep);
   const fillPath = useTransform(fillSweep, s => s > 0.5 ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${s > 180 ? 1 : 0} 1 ${arcX(s)} ${arcY(s)}` : '');
-  
+
   const nx = useTransform(fillSweep, s => cx + (R - 12) * Math.cos(toRad(startAngle - s)));
   const ny = useTransform(fillSweep, s => cy - (R - 12) * Math.sin(toRad(startAngle - s)));
   const displayStr = useTransform(mv, v => Math.round(v).toString());
@@ -256,7 +141,7 @@ function Tachometer({ value, color, isReady }) {
       <svg width="140" height="120" viewBox="0 0 140 120" className="overflow-visible">
         <path d={trackPath} fill="none" stroke="#ffffff0a" strokeWidth="8" strokeLinecap="round" />
         <path d={redlinePath} fill="none" stroke="#ef444440" strokeWidth="8" strokeLinecap="round" />
-        
+
         {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => {
           const a = (i / 10) * sweep;
           const isRed = i >= 9;
@@ -281,28 +166,29 @@ function Tachometer({ value, color, isReady }) {
   );
 }
 
-// Fuel Gauge for RAM (Segmented)
-function FuelGauge({ percent, used, total, color, isReady }) {
+function FuelGauge({ percent, used, total, color }) {
   const mv = useMotionValue(0);
-  const isInitial = useRef(true);
-  
+  const [isSequenceDone, setIsSequenceDone] = useState(false);
+
   useEffect(() => {
-    if (isReady && isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(mv, [0, 100, 0, percent], {
-        duration: 2.8,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut"
-      });
-      return controls.stop;
-    } else if (isReady && !isInitial.current) {
-      const controls = animate(mv, percent, {
-        duration: 0.8,
-        ease: "easeOut"
-      });
-      return controls.stop;
+    let controls;
+    const runSequence = async () => {
+      controls = animate(mv, 100, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      controls = animate(mv, 0, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      setIsSequenceDone(true);
+    };
+    runSequence();
+    return () => controls?.stop();
+  }, [mv]);
+
+  useEffect(() => {
+    if (isSequenceDone && percent !== undefined) {
+      const controls = animate(mv, percent, { duration: 0.8, ease: "easeOut" });
+      return () => controls?.stop();
     }
-  }, [percent, mv, isReady]);
+  }, [percent, isSequenceDone, mv]);
 
   const segments = 16;
   const displayStr = useTransform(mv, v => `${Math.round(v)}`);
@@ -344,35 +230,36 @@ function FuelSegment({ index, mv, totalSegments, color }) {
   const boxShadow = useTransform(background, bg => bg === '#ffffff05' ? 'none' : `0 0 10px ${bg}80`);
 
   return (
-    <motion.div 
+    <motion.div
       className="flex-1 rounded-sm skew-x-[-15deg] border border-black/20"
       style={{ background, opacity, boxShadow }}
     />
   );
 }
 
-// Odometer for Disk Space
-function Odometer({ usedGb, totalGb, color, isReady }) {
+function Odometer({ usedGb, totalGb, color }) {
   const mv = useMotionValue(0);
-  const isInitial = useRef(true);
-  
+  const [isSequenceDone, setIsSequenceDone] = useState(false);
+
   useEffect(() => {
-    if (isReady && isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(mv, [0, 999999, 0, usedGb], {
-        duration: 3.2,
-        times: [0, 0.45, 0.75, 1],
-        ease: "easeInOut"
-      });
-      return controls.stop;
-    } else if (isReady && !isInitial.current) {
-      const controls = animate(mv, usedGb, {
-        duration: 0.8,
-        ease: "easeOut"
-      });
-      return controls.stop;
+    let controls;
+    const runSequence = async () => {
+      controls = animate(mv, 999999, { duration: 1.6, ease: "easeInOut" });
+      await controls;
+      controls = animate(mv, 0, { duration: 1.6, ease: "easeInOut" });
+      await controls;
+      setIsSequenceDone(true);
+    };
+    runSequence();
+    return () => controls?.stop();
+  }, [mv]);
+
+  useEffect(() => {
+    if (isSequenceDone && usedGb !== undefined) {
+      const controls = animate(mv, usedGb, { duration: 0.8, ease: "easeOut" });
+      return () => controls?.stop();
     }
-  }, [usedGb, mv, isReady]);
+  }, [usedGb, isSequenceDone, mv]);
 
   const displayUsed = useTransform(mv, v => Math.round(v).toString().padStart(6, '0'));
 
@@ -406,31 +293,32 @@ function OdometerDigit({ index, displayUsed }) {
   );
 }
 
-// Semi-circle pressure gauge — reads like a speedometer
-function PressureGauge({ load1m, load5m, load15m, cpuCores = 2, isReady }) {
+function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   const pressure = Math.min((load1m / cpuCores) * 100, 120);
   const targetPct = Math.min(pressure, 100);
 
   const mv = useMotionValue(0);
-  const isInitial = useRef(true);
-  
+  const [isSequenceDone, setIsSequenceDone] = useState(false);
+
   useEffect(() => {
-    if (isReady && isInitial.current) {
-      isInitial.current = false;
-      const controls = animate(mv, [0, 100, 0, targetPct], {
-        duration: 2.8,
-        times: [0, 0.4, 0.7, 1],
-        ease: "easeInOut"
-      });
-      return controls.stop;
-    } else if (isReady && !isInitial.current) {
-      const controls = animate(mv, targetPct, {
-        duration: 0.8,
-        ease: "easeOut"
-      });
-      return controls.stop;
+    let controls;
+    const runSequence = async () => {
+      controls = animate(mv, 100, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      controls = animate(mv, 0, { duration: 1.4, ease: "easeInOut" });
+      await controls;
+      setIsSequenceDone(true);
+    };
+    runSequence();
+    return () => controls?.stop();
+  }, [mv]);
+
+  useEffect(() => {
+    if (isSequenceDone && targetPct !== undefined) {
+      const controls = animate(mv, targetPct, { duration: 0.8, ease: "easeOut" });
+      return () => controls?.stop();
     }
-  }, [targetPct, mv, isReady]);
+  }, [targetPct, isSequenceDone, mv]);
 
   const R = 52; const cx = 70; const cy = 68;
   const sweep = 180;
@@ -438,7 +326,7 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2, isReady }) {
   const arcX = (a) => cx + R * Math.cos(toRad(180 - a));
   const arcY = (a) => cy - R * Math.sin(toRad(180 - a));
   const trackPath = `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 0 1 ${arcX(sweep)} ${arcY(sweep)}`;
-  
+
   const fillSweep = useTransform(mv, v => (v / 100) * sweep);
   const fillPath = useTransform(fillSweep, s => s > 0.5 ? `M ${arcX(0)} ${arcY(0)} A ${R} ${R} 0 ${s > 180 ? 1 : 0} 1 ${arcX(s)} ${arcY(s)}` : '');
   const nx = useTransform(fillSweep, s => cx + (R - 10) * Math.cos(toRad(180 - s)));
@@ -458,48 +346,29 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2, isReady }) {
   });
   const glow = useTransform(color, c => `${c}30`);
   const displayStr = useTransform(mv, v => `${Math.round(v)}%`);
-  const trend = load1m > load15m * 1.1 ? 'up' : load1m < load15m * 0.9 ? 'down' : 'flat';
-
-  const zones = [
-    { from: 0, to: 30, c: '#3ecf8e20' }, { from: 30, to: 60, c: '#3b82f620' },
-    { from: 60, to: 85, c: '#f59e0b20' }, { from: 85, to: 100, c: '#ef444420' },
-  ];
 
   return (
-    <div className="flex flex-col items-center w-full">
-      <svg width="140" height="90" viewBox="0 0 140 90" className="overflow-visible">
-        {zones.map(({ from, to, c }, i) => {
-          const f = (from / 100) * sweep; const t = (to / 100) * sweep;
-          return <path key={i} d={`M ${arcX(f)} ${arcY(f)} A ${R} ${R} 0 0 1 ${arcX(t)} ${arcY(t)}`}
-            fill="none" stroke={c} strokeWidth="14" strokeLinecap="butt" />;
-        })}
-        <path d={trackPath} fill="none" stroke="#ffffff08" strokeWidth="6" strokeLinecap="round" />
-        <motion.path d={fillPath} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
-          style={{ filter: useTransform(color, c => `drop-shadow(0 0 5px ${c})`) }} />
-        <motion.line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2.5" strokeLinecap="round"
-          style={{ filter: useTransform(color, c => `drop-shadow(0 0 3px ${c})`) }} />
-        <motion.circle cx={cx} cy={cy} r="4" fill={color} style={{ filter: useTransform(color, c => `drop-shadow(0 0 5px ${c})`) }} />
-        <text x="18" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">0</text>
-        <text x="108" y="84" fill="#444" fontSize="8.5" fontFamily="monospace">100%</text>
+    <div className="flex flex-col items-center">
+      <svg width="140" height="80" viewBox="0 0 140 80" className="overflow-visible">
+        <path d={trackPath} fill="none" stroke="#ffffff0a" strokeWidth="8" strokeLinecap="round" />
+        <motion.path d={fillPath} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round" style={{ filter: useTransform(color, c => `drop-shadow(0 0 6px ${c})`) }} />
+        <motion.line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))' }} />
+        <circle cx={cx} cy={cy} r="5" fill="#222" stroke="#fff" strokeWidth="2" />
       </svg>
-      <div className="flex items-center gap-2 -mt-2">
-        <motion.span className="text-2xl font-bold font-orbitron" style={{ color }}>{displayStr}</motion.span>
-        <motion.span className="text-xs px-2 py-0.5 rounded-full font-semibold border" style={{ color, background: glow, borderColor: useTransform(color, c => `${c}40`) }}>{status}</motion.span>
-        {trend === 'up'   && <span className="text-red-400 font-bold text-sm" title="Load increasing">↑</span>}
-        {trend === 'down' && <span className="text-green-400 font-bold text-sm" title="Load decreasing">↓</span>}
-        {trend === 'flat' && <span className="text-gray-500 text-sm" title="Load stable">→</span>}
-      </div>
-      <div className="flex gap-4 mt-2.5 text-xs text-gray-600">
-        <span>1m <span className="text-gray-300 font-mono">{load1m.toFixed(2)}</span></span>
-        <span>5m <span className="text-gray-300 font-mono">{load5m.toFixed(2)}</span></span>
-        <span>15m <span className="text-gray-300 font-mono">{load15m.toFixed(2)}</span></span>
+      <div className="flex flex-col items-center mt-2">
+        <motion.span className="text-xl font-bold font-orbitron" style={{ color }}>{displayStr}</motion.span>
+        <div className="flex gap-2 mt-1">
+          <motion.span className="text-[9px] font-bold tracking-widest uppercase border border-white/10 px-1.5 py-0.5 rounded" style={{ color: color, backgroundColor: glow }}>
+            {status}
+          </motion.span>
+        </div>
       </div>
     </div>
   );
 }
 
 const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
+  if (!active || !payload || !payload.length) return null;
   return (
     <div className="bg-[#111] border border-gray-800 rounded-xl p-3 shadow-2xl text-xs">
       <p className="text-gray-400 mb-2 font-mono">{label}</p>
@@ -521,96 +390,140 @@ const PeriodBtn = ({ label, active, onClick }) => (
   </button>
 );
 
+// ----------- Module Cache -----------
+let cachedNodes = [];
+let cachedInstances = {};
+let cachedAlerts = [];
+let cachedSelectedNode = '';
+let cachedLiveData = null;
+let cachedLastUpdated = null;
+let cachedSummary = {};
+let cachedHistory = [];
+let cachedPeriod = '1h';
+
 // ----------- Main Page -----------
 
 export default function Overview() {
-  const [nodes, setNodes] = useState([]);
-  const [instances, setInstances] = useState({});
-  const [alerts, setAlerts] = useState([]);
-  const [selectedNode, setSelectedNode] = useState('');
-  const [liveData, setLiveData] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [summary, setSummary] = useState({});
-  const [period, setPeriod] = useState('1h');
-  const [liveLoading, setLiveLoading] = useState(true);
-  const [histLoading, setHistLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [isReady, setIsReady] = useState(false);
+  const [nodes, setNodes] = useState(cachedNodes);
+  const [instances, setInstances] = useState(cachedInstances);
+  const [alerts, setAlerts] = useState(cachedAlerts);
+  const [selectedNode, setSelectedNode] = useState(cachedSelectedNode);
+  const [liveData, setLiveData] = useState(cachedLiveData);
+  const [history, setHistory] = useState(cachedHistory);
+  const [summary, setSummary] = useState(cachedSummary);
+  const [period, setPeriod] = useState(cachedPeriod);
+  const [selectedMetric, setSelectedMetric] = useState('cpu');
+  
+  const [liveLoading, setLiveLoading] = useState(!cachedLiveData);
+  const [histLoading, setHistLoading] = useState(cachedHistory.length === 0);
+  const [lastUpdated, setLastUpdated] = useState(cachedLastUpdated);
   const [minLoadingDone, setMinLoadingDone] = useState(false);
-  const [dataReady, setDataReady] = useState(false);
+  const [isReady, setIsReady] = useState(!!cachedLiveData);
 
   useEffect(() => {
-    // Minimum visual time for the loader cycle
-    const timer = setTimeout(() => setMinLoadingDone(true), 1800);
+    if (cachedLiveData) return;
+    const timer = setTimeout(() => setMinLoadingDone(true), 3200);
     return () => clearTimeout(timer);
   }, []);
 
-  // Monitor when data is actually ready
   useEffect(() => {
-    if (liveData && minLoadingDone) {
-      setDataReady(true);
+    if ((minLoadingDone || cachedLiveData) && !liveLoading && !histLoading && !isReady) {
+      setIsReady(true);
     }
-  }, [liveData, minLoadingDone]);
+  }, [minLoadingDone, liveLoading, histLoading, isReady]);
 
-  // isReady is only set when the loader calls onReadyToExit callback
-  const handleLoaderExit = useCallback(() => {
-    setIsReady(true);
-  }, []);
-
-  // Load nodes and instances once
   useEffect(() => {
-    Promise.all([apiFetch('/nodes'), apiFetch('/instances')]).then(([n, i]) => {
-      setNodes(n);
-      setInstances(i);
-      if (n.length > 0) setSelectedNode(n[0].id);
-    });
+    if (cachedNodes.length === 0) {
+      Promise.all([apiFetch('/nodes'), apiFetch('/instances')]).then(([n, i]) => {
+        cachedNodes = n;
+        cachedInstances = i;
+        setNodes(n);
+        setInstances(i);
+        if (n.length > 0 && !cachedSelectedNode) {
+          cachedSelectedNode = n[0].id;
+          setSelectedNode(n[0].id);
+        }
+      });
+    }
   }, []);
 
-  // Poll live stats every 5 seconds
   useEffect(() => {
     if (!selectedNode) return;
-    setLiveLoading(true);
+    
+    if (selectedNode !== cachedSelectedNode) {
+      setLiveLoading(true);
+      setIsReady(false);
+      cachedSelectedNode = selectedNode;
+      cachedLiveData = null;
+      setMinLoadingDone(false);
+      const timer = setTimeout(() => setMinLoadingDone(true), 3200);
+      
+      const fetchLive = async () => {
+        try {
+          const data = await apiFetch(`/stats/${selectedNode}`);
+          cachedLiveData = data;
+          cachedLastUpdated = new Date();
+          setLiveData(data);
+          setLastUpdated(cachedLastUpdated);
+          setLiveLoading(false);
+        } catch { setLiveLoading(false); }
+      };
+      fetchLive();
+      return () => clearTimeout(timer);
+    }
+
     const fetchLive = async () => {
       try {
         const data = await apiFetch(`/stats/${selectedNode}`);
+        cachedLiveData = data;
+        cachedLastUpdated = new Date();
         setLiveData(data);
-        setLastUpdated(new Date());
+        setLastUpdated(cachedLastUpdated);
         setLiveLoading(false);
       } catch { setLiveLoading(false); }
     };
-    fetchLive();
-    const int = setInterval(fetchLive, 15000); // 15s — data updates every 30s via poller
+    
+    if (!cachedLiveData) fetchLive();
+    const int = setInterval(fetchLive, 15000);
     return () => clearInterval(int);
   }, [selectedNode]);
 
-  // Poll alerts every 15 seconds
   useEffect(() => {
     const fetchAlerts = async () => {
-      try { setAlerts(await apiFetch('/alerts')); } catch {}
+      try {
+        const data = await apiFetch('/alerts');
+        cachedAlerts = data;
+        setAlerts(data);
+      } catch { }
     };
-    fetchAlerts();
+    if (cachedAlerts.length === 0) fetchAlerts();
     const int = setInterval(fetchAlerts, 30000);
     return () => clearInterval(int);
   }, []);
 
-  // Fetch historical data when period or node changes
   useEffect(() => {
     if (!selectedNode) return;
-    setHistLoading(true);
-    Promise.all([
-      apiFetch(`/metrics/${selectedNode}?period=${period}`),
-      apiFetch(`/metrics/summary/${selectedNode}`)
-    ]).then(([hist, sum]) => {
-      setHistory(hist.map(r => ({
-        time: formatTime(r.recorded_at),
-        cpu: parseFloat(r.cpu_percent) || 0,
-        ram: parseFloat(r.ram_percent) || 0,
-        disk: parseFloat(r.disk_percent) || 0,
-        load: parseFloat(r.load_avg_1m) || 0,
-      })));
-      setSummary(sum);
-      setHistLoading(false);
-    }).catch(() => setHistLoading(false));
+    if (selectedNode !== cachedSelectedNode || period !== cachedPeriod || cachedHistory.length === 0) {
+      setHistLoading(true);
+      Promise.all([
+        apiFetch(`/metrics/${selectedNode}?period=${period}`),
+        apiFetch(`/metrics/summary/${selectedNode}`)
+      ]).then(([hist, sum]) => {
+        const processed = hist.map(r => ({
+          time: new Date(r.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          cpu: parseFloat(r.cpu_percent) || 0,
+          ram: parseFloat(r.ram_percent) || 0,
+          disk: parseFloat(r.disk_percent) || 0,
+          load: parseFloat(r.load_avg_1m) || 0,
+        }));
+        cachedHistory = processed;
+        cachedSummary = sum;
+        cachedPeriod = period;
+        setHistory(processed);
+        setSummary(sum);
+        setHistLoading(false);
+      }).catch(() => setHistLoading(false));
+    }
   }, [selectedNode, period]);
 
   const node = nodes.find(n => n.id === selectedNode);
@@ -622,10 +535,6 @@ export default function Overview() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
-      {/* Full Screen Disc Brake Loader Overlay - Handover based on physics loop */}
-      {!isReady && createPortal(<DiscBrakeLoader dataReady={dataReady} onReadyToExit={handleLoaderExit} />, document.body)}
-
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-orbitron text-white uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400">Telemetry Overview</h1>
@@ -645,7 +554,6 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* Alerts banner */}
       <AnimatePresence>
         {alerts.length > 0 && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
@@ -661,194 +569,231 @@ export default function Overview() {
         )}
       </AnimatePresence>
 
-      {/* Hero Stats Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Server} label="Connected Nodes" value={nodes.length}
-          sub={`${nodes.length} reachable`} color="#3b82f6" />
-        <StatCard icon={Database} label="Active Instances" value={activeCount}
-          sub={`${Object.keys(instances).length} total`} color="#3ecf8e" animate />
-        <StatCard icon={AlertTriangle} label="Active Alerts" value={alerts.length}
-          sub={alerts.length === 0 ? "All systems healthy" : "Requires attention"}
-          color={alerts.length > 0 ? "#ef4444" : "#3ecf8e"} />
-        <StatCard icon={Cpu} label="Current CPU" value={liveData ? `${fmt(liveData.cpu)}%` : '—'}
-          sub={liveData ? `Load: ${fmt(liveData.load_avg_1m, 2)}` : 'Fetching...'}
-          color={cpuThresh.color} loading={liveLoading} animate />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {nodes.length === 0 ? (
+          <>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </>
+        ) : (
+          <>
+            <ApexStatCard icon={Server} label="Active Nodes" value={nodes.length} sub={`${nodes.length} Online`} color="#3b82f6" />
+            <ApexStatCard icon={Database} label="Instances" value={Object.keys(instances).length}
+              sub={`${activeCount} Fleet running`} color="#3ecf8e" />
+            <ApexStatCard icon={AlertTriangle} label="System Alerts" value={alerts.length}
+              sub={alerts.length === 0 ? "All systems healthy" : "Requires attention"}
+              color={alerts.length > 0 ? "#ef4444" : "#3ecf8e"} />
+            <ApexStatCard icon={Cpu} label="Current CPU" value={liveData ? `${fmt(liveData.cpu)}%` : '—'}
+              sub={liveData ? `Load: ${fmt(liveData.load_avg_1m, 2)}` : 'Fetching...'}
+              color={cpuThresh.color} loading={liveLoading} animate />
+          </>
+        )}
       </div>
 
-      {/* Live Metrics 2x2 Grid */}
-      <section>
-        <div className="flex items-center gap-3 mb-4">
-          <span className="w-1.5 h-6 bg-[#3ecf8e] rounded-r shadow-[0_0_8px_#3ecf8e]" />
-          <h2 className="text-lg font-orbitron font-bold text-white tracking-widest uppercase flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-supa-green animate-pulse inline-block" />
-            Live Metrics — {node?.name || "Connecting"}
-          </h2>
+      <section className="space-y-6">
+        <div className="flex items-center gap-3">
+          <span className="w-1.5 h-8 bg-supa-green rounded-r shadow-[0_0_12px_#3ecf8e]" />
+          <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Vitals Control</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-            {/* CPU (Tachometer) */}
-            <motion.div whileHover={{ y: -2 }} className={`glass p-5 rounded-2xl border ${cpuThresh.bg} relative overflow-hidden`}>
-              <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
-              <div className="flex justify-between items-center mb-1">
-                <div className="flex items-center gap-2">
-                  <Cpu size={18} style={{ color: cpuThresh.color }} />
-                  <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">CPU RPM</span>
-                </div>
-                <span className="text-[10px] font-orbitron tracking-widest px-2 py-0.5 rounded-full" style={{ color: cpuThresh.color, background: `${cpuThresh.color}15` }}>
-                  {cpuThresh.label}
-                </span>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+          <motion.div whileHover={{ y: -4 }} className={`glass p-6 rounded-3xl border ${cpuThresh.bg} relative overflow-hidden flex flex-col justify-between shadow-2xl transition-all duration-300`}>
+            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
+            <div className="flex justify-between items-center mb-4 relative z-10">
+              <div className="flex items-center gap-2">
+                <Cpu size={20} style={{ color: cpuThresh.color }} />
+                <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">CPU TACHO</span>
               </div>
-              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} isReady={isReady} />
-            </motion.div>
+              <div className="flex flex-col items-end">
+                <span className="text-[11px] font-orbitron font-bold" style={{ color: cpuThresh.color }}>{fmt(liveData?.cpu || 0)}%</span>
+                <span className="text-[8px] text-gray-500 font-mono uppercase tracking-tighter">Usage</span>
+              </div>
+            </div>
+            <div className="relative h-44 flex items-center justify-center">
+              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} />
+            </div>
+          </motion.div>
 
-            {/* RAM (Fuel Gauge) */}
-            <motion.div whileHover={{ y: -2 }} className={`glass p-5 rounded-2xl border ${ramThresh.bg} relative overflow-hidden flex flex-col justify-between`}>
-              <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
-              <div className="flex justify-between items-center mb-3">
-                <div className="flex items-center gap-2">
-                  <MemoryStick size={18} style={{ color: ramThresh.color }} />
-                  <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">RAM FUEL</span>
-                </div>
-                <span className="text-[10px] font-orbitron px-2 py-0.5 rounded border border-white/10" style={{ color: ramThresh.color, background: `${ramThresh.color}15` }}>
-                  {fmt(liveData?.ram_percent || 0)}%
-                </span>
+          <motion.div whileHover={{ y: -4 }} className={`glass p-6 rounded-3xl border ${ramThresh.bg} relative overflow-hidden flex flex-col justify-between shadow-2xl transition-all duration-300`}>
+            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
+            <div className="flex justify-between items-center mb-4 relative z-10">
+              <div className="flex items-center gap-2">
+                <MemoryStick size={20} style={{ color: ramThresh.color }} />
+                <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">RAM FUEL</span>
               </div>
-              <FuelGauge 
-                percent={liveData?.ram_percent || 0} 
-                used={liveData?.ram_used_mb || 0} 
-                total={liveData?.ram_total_mb || 1024} 
-                color={ramThresh.color} 
-                isReady={isReady}
+              <div className="flex flex-col items-end">
+                <span className="text-[11px] font-orbitron font-bold" style={{ color: ramThresh.color }}>{fmt(liveData?.ram_percent || 0)}%</span>
+                <span className="text-[8px] text-gray-500 font-mono uppercase tracking-tighter">{liveData?.ram_used_mb || 0} MB</span>
+              </div>
+            </div>
+            <div className="relative h-44 flex items-center justify-center">
+              <FuelGauge
+                percent={liveData?.ram_percent || 0}
+                used={liveData?.ram_used_mb || 0}
+                total={liveData?.ram_total_mb || 1024}
+                color={ramThresh.color}
               />
-            </motion.div>
+            </div>
+          </motion.div>
 
-            {/* Disk Gauge (Odometer) */}
-            <motion.div whileHover={{ y: -2 }} className={`glass p-5 rounded-2xl border ${diskThresh.bg} flex flex-col justify-between`}>
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-2">
-                  <HardDrive size={18} style={{ color: diskThresh.color }} />
-                  <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">DISK ODOMETER</span>
-                </div>
-                <span className="text-[10px] font-orbitron px-2 py-0.5 rounded border border-white/10" style={{ color: diskThresh.color, background: `${diskThresh.color}15` }}>
-                  {diskThresh.label}
-                </span>
+          <motion.div whileHover={{ y: -4 }} className={`glass p-6 rounded-3xl border ${diskThresh.bg} relative overflow-hidden flex flex-col justify-between shadow-2xl transition-all duration-300`}>
+            <div className="flex justify-between items-center mb-6 relative z-10">
+              <div className="flex items-center gap-2">
+                <HardDrive size={20} style={{ color: diskThresh.color }} />
+                <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">DISK ODO</span>
               </div>
-              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} isReady={isReady} />
-            </motion.div>
+              <span className="text-[11px] font-orbitron px-2 py-0.5 rounded-lg border border-white/10 font-bold uppercase tracking-widest" style={{ color: diskThresh.color, background: `${diskThresh.color}15` }}>
+                {diskThresh.label}
+              </span>
+            </div>
+            <div className="flex-1 flex items-center justify-center">
+              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} />
+            </div>
+            <p className="text-[9px] text-center text-gray-600 mt-4 uppercase tracking-[0.2em] font-bold">SSD Health Optimal</p>
+          </motion.div>
 
-            {/* System Pressure (Turbo Boost) */}
-            <motion.div whileHover={{ y: -2 }} className="glass p-5 rounded-2xl border border-white/5 shadow-inner flex flex-col items-center justify-center relative overflow-hidden">
-              <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
-              <div className="flex justify-between items-center w-full mb-3">
-                <div className="flex items-center gap-2">
-                  <Zap size={18} className="text-blue-400" />
-                  <span className="font-semibold font-orbitron tracking-widest text-[10px] text-white">TURBO BOOST</span>
-                  <span className="text-[8px] text-gray-500 font-mono ml-1 uppercase">{liveData?.cpu_cores || 2} CORES!</span>
-                </div>
+          <motion.div whileHover={{ y: -4 }} className="glass p-6 rounded-3xl border border-white/5 shadow-inner flex flex-col items-center justify-center relative overflow-hidden shadow-2xl transition-all duration-300">
+            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/10 to-transparent" />
+            <div className="flex justify-between items-center w-full mb-4 relative z-10">
+              <div className="flex items-center gap-2">
+                <Zap size={20} className="text-blue-400" />
+                <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">TURBO BOOST</span>
               </div>
-              <PressureGauge 
-                load1m={liveData?.load_avg_1m || 0} 
-                load5m={liveData?.load_avg_5m || 0} 
-                load15m={liveData?.load_avg_15m || 0} 
+              <span className="text-[9px] text-blue-400 font-black uppercase tracking-tighter bg-blue-400/10 px-2 py-0.5 rounded-lg border border-blue-400/20">{liveData?.cpu_cores || 2} CORES</span>
+            </div>
+            <div className="relative h-44 flex items-center justify-center">
+              <PressureGauge
+                load1m={liveData?.load_avg_1m || 0}
+                load5m={liveData?.load_avg_5m || 0}
+                load15m={liveData?.load_avg_15m || 0}
                 cpuCores={liveData?.cpu_cores || 2}
-                isReady={isReady}
               />
-            </motion.div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
 
+      {!isReady ? (
+        <section className="space-y-6">
+          <div className="flex items-center gap-3">
+            <Skeleton className="w-1.5 h-8 rounded-r" />
+            <Skeleton className="w-48 h-6" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
           </div>
         </section>
-
-      {/* Insights Panel */}
-      {liveData && (
-        <section>
-          <div className="flex items-center gap-3 mb-4">
-            <span className="w-1.5 h-6 bg-amber-500 rounded-r shadow-[0_0_8px_#f59e0b]" />
-            <h2 className="text-lg font-orbitron font-bold text-white tracking-widest uppercase flex items-center gap-2">
-              <Zap size={18} className="text-amber-400" /> Intelligent Insights
-            </h2>
+      ) : (
+        <section className="space-y-6">
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-8 bg-blue-500 rounded-r shadow-[0_0_12px_#3b82f6]" />
+            <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Engine Diagnostics</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {/* Top process */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
-              <div className="p-2 border border-purple-500/20 bg-purple-500/10 rounded shadow-[inset_0_0_8px_rgba(168,85,247,0.2)]"><Package size={16} className="text-purple-400" /></div>
-              <div>
-                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Top Memory Consumer</p>
-                <p className="text-white font-mono font-bold">{liveData.top_process_name || '—'}</p>
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1"><span className="text-purple-400">{liveData.top_process_ram_mb || 0}</span> MB RAM</p>
-              </div>
-            </motion.div>
 
-            {/* Uptime */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
-              <div className="p-2 border border-[#3ecf8e20] bg-[#3ecf8e10] rounded shadow-[inset_0_0_8px_rgba(62,207,142,0.2)]"><Clock size={16} className="text-[#3ecf8e]" /></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <motion.div whileHover={{ scale: 1.02 }} className="glass p-6 rounded-2xl border border-white/5 shadow-xl flex flex-col items-center text-center gap-4 transition-all">
+              <div className="p-3 border border-gray-600/30 bg-gray-600/10 rounded-2xl shadow-[inset_0_0_12px_rgba(255,255,255,0.05)]"><Package size={22} className="text-gray-400" /></div>
               <div>
-                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Server Uptime</p>
-                <p className="text-white font-mono font-bold tracking-wider">{formatUptime(liveData.uptime_seconds || 0)}</p>
-                <p className="text-[10px] text-[#3ecf8e] uppercase tracking-widest mt-1">Stable</p>
-              </div>
-            </motion.div>
-
-            {/* Docker containers */}
-            <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
-              <div className="p-2 border border-blue-500/20 bg-blue-500/10 rounded shadow-[inset_0_0_8px_rgba(59,130,246,0.2)]"><Database size={16} className="text-blue-400" /></div>
-              <div>
-                <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">Docker Containers</p>
-                <p className="text-white font-mono font-bold"><span className="text-blue-400">{liveData.docker_container_count || 0}</span> running</p>
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">{activeCount} managed instances</p>
-              </div>
-            </motion.div>
-
-            {/* 24h CPU peak */}
-            {summary.peak_cpu && (
-              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
-                <div className="p-2 border border-amber-500/20 bg-amber-500/10 rounded shadow-[inset_0_0_8px_rgba(245,158,11,0.2)]"><TrendingUp size={16} className="text-amber-400" /></div>
-                <div>
-                  <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">24h CPU Peak</p>
-                  <p className="text-white font-mono font-bold tracking-wider">{fmt(summary.peak_cpu)}%</p>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">avg: <span className="text-amber-400">{fmt(summary.avg_cpu)}%</span></p>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">Platform OS</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{liveData?.os_name || 'Linux'}</p>
+                <div className="mt-3 px-3 py-1 bg-black/40 rounded-full border border-white/10">
+                  <span className="text-[11px] text-gray-400 font-bold uppercase tracking-widest">{liveData?.os_version || 'N/A'}</span>
                 </div>
-              </motion.div>
-            )}
+              </div>
+            </motion.div>
 
-            {/* 24h RAM peak */}
-            {summary.peak_ram && (
-              <motion.div whileHover={{ scale: 1.01 }} className="glass p-4 rounded-xl border border-white/5 shadow-inner flex items-start gap-4">
-                <div className="p-2 border border-red-500/20 bg-red-500/10 rounded shadow-[inset_0_0_8px_rgba(239,68,68,0.2)]"><TrendingUp size={16} className="text-red-400" /></div>
-                <div>
-                  <p className="text-[10px] font-orbitron uppercase tracking-widest text-gray-500 mb-1">24h RAM Peak</p>
-                  <p className="text-white font-mono font-bold tracking-wider">{fmt(summary.peak_ram)}%</p>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-1">avg: <span className="text-red-400">{fmt(summary.avg_ram)}%</span></p>
+            <motion.div whileHover={{ scale: 1.02 }} className="glass p-6 rounded-2xl border border-white/5 shadow-xl flex flex-col items-center text-center gap-4 transition-all">
+              <div className="p-3 border border-[#3ecf8e20] bg-[#3ecf8e10] rounded-2xl shadow-[inset_0_0_12px_rgba(62,207,142,0.2)]"><Clock size={22} className="text-[#3ecf8e]" /></div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">Runtime</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{formatUptime(liveData?.uptime_seconds || 0)}</p>
+                <div className="mt-3 px-3 py-1 bg-[#3ecf8e10] rounded-full border border-[#3ecf8e20]">
+                  <span className="text-[11px] text-[#3ecf8e] font-bold uppercase tracking-widest">STABLE</span>
                 </div>
-              </motion.div>
-            )}
+              </div>
+            </motion.div>
+
+            <motion.div whileHover={{ scale: 1.02 }} className="glass p-6 rounded-2xl border border-white/5 shadow-xl flex flex-col items-center text-center gap-4 transition-all">
+              <div className="p-3 border border-blue-500/20 bg-blue-500/10 rounded-2xl shadow-[inset_0_0_12px_rgba(59,130,246,0.2)]"><Database size={22} className="text-blue-400" /></div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">Containers</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{liveData?.docker_container_count || 0} ACTIVE</p>
+                <div className="mt-3 px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
+                  <span className="text-[11px] text-blue-400 font-bold uppercase tracking-widest">{activeCount} MANAGED</span>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div whileHover={{ scale: 1.02 }} className="glass p-6 rounded-2xl border border-white/5 shadow-xl flex flex-col items-center text-center gap-4 transition-all">
+              <div className="p-3 border border-amber-500/20 bg-amber-500/10 rounded-2xl shadow-[inset_0_0_12px_rgba(245,158,11,0.2)]"><TrendingUp size={22} className="text-amber-400" /></div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">CPU Peak</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{fmt(summary.peak_cpu || 0)}%</p>
+                <div className="mt-3 px-3 py-1 bg-amber-500/10 rounded-full border border-amber-500/20">
+                  <span className="text-[11px] text-amber-400 font-bold uppercase tracking-widest">AVG: {fmt(summary.avg_cpu || 0)}%</span>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div whileHover={{ scale: 1.02 }} className="glass p-6 rounded-2xl border border-white/5 shadow-xl flex flex-col items-center text-center gap-4 transition-all">
+              <div className="p-3 border border-red-500/20 bg-red-500/10 rounded-2xl shadow-[inset_0_0_12px_rgba(239,68,68,0.2)]"><TrendingUp size={22} className="text-red-400" /></div>
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">RAM Peak</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{fmt(summary.peak_ram || 0)}%</p>
+                <div className="mt-3 px-3 py-1 bg-red-500/10 rounded-full border border-red-500/20">
+                  <span className="text-[11px] text-red-400 font-bold uppercase tracking-widest">AVG: {fmt(summary.avg_ram || 0)}%</span>
+                </div>
+              </div>
+            </motion.div>
           </div>
         </section>
       )}
 
-      {/* Historical Trend */}
-      <section className="glass p-6 rounded-xl border border-white/5 shadow-inner">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <div className="flex items-center gap-3">
-            <span className="w-1.5 h-8 bg-blue-500 rounded-r shadow-[0_0_8px_#3b82f6]" />
+      <section className="glass p-10 rounded-3xl border border-white/5 shadow-2xl relative z-10">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-10 gap-6">
+          <div className="flex items-center gap-4">
+            <span className="w-1.5 h-10 bg-blue-500 rounded-r shadow-[0_0_12px_#3b82f6]" />
             <div>
-              <h2 className="text-lg font-orbitron font-bold tracking-widest text-white uppercase">Historical Trend</h2>
-              <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-1">
-                {history.length === 0 ? 'Collecting data — updates every 30s' : `${history.length} telemetry points logged`}
+              <h2 className="text-2xl font-orbitron font-black tracking-[0.25em] text-white uppercase">Historical Stream</h2>
+              <p className="text-gray-600 text-[11px] uppercase font-bold tracking-[0.1em] mt-2">
+                {history.length === 0 ? 'SYNCHRONIZING TELEMETRY...' : `${history.length} DATA POINTS AGGREGATED`}
               </p>
             </div>
           </div>
-          <div className="flex bg-[#0a0a0c] p-1 rounded border border-white/10 shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)]">
-            {['1h', '6h', '24h', '7d', '30d'].map(p => (
-              <PeriodBtn key={p} label={p} active={period === p} onClick={() => setPeriod(p)} />
-            ))}
+          <div className="flex gap-4">
+            <div className="flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner">
+              {['cpu', 'ram', 'disk'].map(m => (
+                <button
+                  key={m}
+                  onClick={() => setSelectedMetric(m)}
+                  className={`px-4 py-1.5 text-[10px] font-orbitron font-bold uppercase tracking-[0.2em] rounded-xl transition-all ${
+                    selectedMetric === m ? (m==='cpu'?'bg-[#3ecf8e] text-black shadow-[0_0_15px_#3ecf8e80]':m==='ram'?'bg-[#8b5cf6] text-white shadow-[0_0_15px_#8b5cf680]':'bg-[#f59e0b] text-black shadow-[0_0_15px_#f59e0b80]') : 'text-gray-500 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <div className="flex bg-black/60 p-1.5 rounded-2xl border border-white/10 shadow-inner">
+              {['1h', '6h', '24h', '7d', '30d'].map(p => (
+                <PeriodBtn key={p} label={p} active={period === p} onClick={() => setPeriod(p)} />
+              ))}
+            </div>
           </div>
         </div>
 
-        {histLoading ? (
-          <div className="h-64 flex items-center justify-center">
+        {!isReady ? (
+          <div className="h-64 flex flex-col items-center justify-center gap-6 px-10">
             <div className="flex gap-2">
-              {[0,1,2].map(i => <div key={i} className="w-2 h-2 rounded-full bg-supa-green animate-bounce" style={{ animationDelay: `${i*150}ms` }} />)}
+              {[0, 1, 2].map(i => <div key={i} className="w-2 h-2 rounded-full bg-supa-green animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />)}
             </div>
+            <GraphSkeleton />
           </div>
         ) : history.length === 0 ? (
           <div className="h-64 flex items-center justify-center text-gray-600 text-sm">
@@ -862,42 +807,32 @@ export default function Overview() {
           <>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <AreaChart data={history} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <BarChart data={history} margin={{ top: 5, right: 10, left: -20, bottom: 0 }} barGap={2}>
                   <defs>
-                    <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3ecf8e" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#3ecf8e" stopOpacity={0} />
+                    <linearGradient id="gCpuBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3ecf8e" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#3ecf8e" stopOpacity={0.1} />
                     </linearGradient>
-                    <linearGradient id="gRam" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                    <linearGradient id="gRamBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.1} />
                     </linearGradient>
-                    <linearGradient id="gDisk" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                    <linearGradient id="gDiskBar" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f59e0b" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.1} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
-                  <XAxis dataKey="time" stroke="transparent" tick={{ fill: '#555', fontSize: 11 }}
-                    interval="preserveStartEnd" />
+                  <XAxis dataKey="time" stroke="transparent" tick={{ fill: '#555', fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis stroke="transparent" tick={{ fill: '#555', fontSize: 11 }} domain={[0, 100]} unit="%" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="cpu" stroke="#3ecf8e" strokeWidth={2}
-                    fillOpacity={1} fill="url(#gCpu)" name="CPU" dot={false} />
-                  <Area type="monotone" dataKey="ram" stroke="#8b5cf6" strokeWidth={2}
-                    fillOpacity={1} fill="url(#gRam)" name="RAM" dot={false} />
-                  <Area type="monotone" dataKey="disk" stroke="#f59e0b" strokeWidth={1.5}
-                    fillOpacity={1} fill="url(#gDisk)" name="Disk" dot={false} strokeDasharray="4 2" />
-                </AreaChart>
+                  <Tooltip cursor={{ fill: '#ffffff0a' }} content={<CustomTooltip />} />
+                  <Bar 
+                    dataKey={selectedMetric} 
+                    radius={[4, 4, 0, 0]} 
+                    fill={selectedMetric === 'cpu' ? 'url(#gCpuBar)' : selectedMetric === 'ram' ? 'url(#gRamBar)' : 'url(#gDiskBar)'}
+                  />
+                </BarChart>
               </ResponsiveContainer>
-            </div>
-            <div className="flex gap-4 mt-3 justify-end">
-              {[['CPU', '#3ecf8e'], ['RAM', '#8b5cf6'], ['Disk', '#f59e0b']].map(([name, color]) => (
-                <span key={name} className="flex items-center gap-1.5 text-xs text-gray-400">
-                  <span className="w-3 h-0.5 rounded-full inline-block" style={{ background: color }} />
-                  {name}
-                </span>
-              ))}
             </div>
           </>
         )}
