@@ -71,14 +71,27 @@ function StatCard({ icon: Icon, label, value, sub, color = '#3ecf8e', animate = 
 function Tachometer({ value, color }) {
   const [displayValue, setDisplayValue] = useState(0);
   const currentVal = useRef(0);
+  const isInitial = useRef(true);
   
   useEffect(() => {
-    const controls = animate(currentVal.current, value, {
-      duration: 1.2,
-      ease: "easeOut",
-      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-    });
-    return controls.stop;
+    if (isInitial.current) {
+      isInitial.current = false;
+      const controls = animate(0, [0, 100, 0, value], {
+        delay: 0.8,
+        duration: 2.5,
+        times: [0, 0.4, 0.7, 1],
+        ease: "easeInOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    } else {
+      const controls = animate(currentVal.current, value, {
+        duration: 0.8,
+        ease: "easeOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    }
   }, [value]);
 
   const R = 54; const cx = 70; const cy = 70;
@@ -133,14 +146,27 @@ function Tachometer({ value, color }) {
 function FuelGauge({ percent, used, total, color }) {
   const [displayValue, setDisplayValue] = useState(0);
   const currentVal = useRef(0);
+  const isInitial = useRef(true);
   
   useEffect(() => {
-    const controls = animate(currentVal.current, percent, {
-      duration: 1.2,
-      ease: "easeOut",
-      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-    });
-    return controls.stop;
+    if (isInitial.current) {
+      isInitial.current = false;
+      const controls = animate(0, [0, 100, 0, percent], {
+        delay: 0.8,
+        duration: 2.5,
+        times: [0, 0.4, 0.7, 1],
+        ease: "easeInOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    } else {
+      const controls = animate(currentVal.current, percent, {
+        duration: 0.8,
+        ease: "easeOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    }
   }, [percent]);
 
   const segments = 16;
@@ -181,14 +207,27 @@ function FuelGauge({ percent, used, total, color }) {
 function Odometer({ usedGb, totalGb, color }) {
   const [displayUsed, setDisplayUsed] = useState(0);
   const currentVal = useRef(0);
+  const isInitial = useRef(true);
   
   useEffect(() => {
-    const controls = animate(currentVal.current, usedGb, {
-      duration: 1.2,
-      ease: "easeOut",
-      onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
-    });
-    return controls.stop;
+    if (isInitial.current) {
+      isInitial.current = false;
+      const controls = animate(0, [0, totalGb, 0, usedGb], {
+        delay: 0.8,
+        duration: 2.5,
+        times: [0, 0.4, 0.7, 1],
+        ease: "easeInOut",
+        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    } else {
+      const controls = animate(currentVal.current, usedGb, {
+        duration: 0.8,
+        ease: "easeOut",
+        onUpdate: (v) => { setDisplayUsed(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    }
   }, [usedGb, totalGb]);
 
   const padStr = Math.round(displayUsed).toString().padStart(6, '0');
@@ -228,14 +267,27 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
 
   const [displayValue, setDisplayValue] = useState(0);
   const currentVal = useRef(0);
+  const isInitial = useRef(true);
   
   useEffect(() => {
-    const controls = animate(currentVal.current, targetPct, {
-      duration: 1.2,
-      ease: "easeOut",
-      onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
-    });
-    return controls.stop;
+    if (isInitial.current) {
+      isInitial.current = false;
+      const controls = animate(0, [0, 100, 0, targetPct], {
+        delay: 0.8,
+        duration: 2.5,
+        times: [0, 0.4, 0.7, 1],
+        ease: "easeInOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    } else {
+      const controls = animate(currentVal.current, targetPct, {
+        duration: 0.8,
+        ease: "easeOut",
+        onUpdate: (v) => { setDisplayValue(v); currentVal.current = v; }
+      });
+      return controls.stop;
+    }
   }, [targetPct]);
 
   let status, color, glow;
