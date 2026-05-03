@@ -112,11 +112,11 @@ function Tachometer({ value, color }) {
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2.5" strokeLinecap="round" style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))', transition: 'all 0.8s cubic-bezier(0.34, 1.56, 0.64, 1)' }} />
         <circle cx={cx} cy={cy} r="5" fill="#222" stroke={displayValue > 85 ? '#ef4444' : '#fff'} strokeWidth="2" style={{ transition: 'stroke 0.8s' }} />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pt-6 pointer-events-none">
-        <span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: displayValue > 85 ? '#ef4444' : color, transition: 'color 0.8s' }}>
+      <div className="absolute top-[85px] flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-2xl font-bold font-orbitron tracking-wider" style={{ color: displayValue > 85 ? '#ef4444' : '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.8)', transition: 'color 0.8s' }}>
           {Math.round(displayValue)}
         </span>
-        <span className="text-[10px] text-gray-500 font-bold tracking-widest uppercase mt-1">RPM x100</span>
+        <span className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: displayValue > 85 ? '#ef4444' : color, textShadow: `0 0 8px ${color}80`, transition: 'color 0.8s' }}>RPM x100</span>
       </div>
     </div>
   );
