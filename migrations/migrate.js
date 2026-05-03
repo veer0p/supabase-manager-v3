@@ -10,7 +10,11 @@ const backendDir = path.join(__dirname, '../backend');
 const { Pool } = require(path.join(backendDir, 'node_modules', 'pg'));
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
-const DB_URL = process.env.DATABASE_URL || 'postgresql://postgres:vcp2CWFk91DO@144.91.101.255:5435/postgres';
+const DB_URL = process.env.DATABASE_URL;
+if (!DB_URL) {
+    console.error('❌ Error: DATABASE_URL is not defined in environment.');
+    process.exit(1);
+}
 const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 10000 });
 
 async function migrate() {

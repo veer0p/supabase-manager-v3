@@ -21,11 +21,14 @@ jobs:
           npm install
           npm run build
 
+      - name: Install Root Dependencies
+        run: npm install
+
       - name: Deploy to VPS
         env:
-          VPS_HOST: "144.91.101.255"
+          VPS_HOST: ${{ secrets.VPS_IP }}
           VPS_USER: "root"
           VPS_PASS: ${{ secrets.VPS_PASSWORD }}
-          DATABASE_URL: "postgresql://postgres:vcp2CWFk91DO@localhost:5435/postgres"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           node deploy_to_vps.js

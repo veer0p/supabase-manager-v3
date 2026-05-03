@@ -4,9 +4,14 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const ssh = new NodeSSH();
 
-const VPS_IP = process.env.VPS_IP || "144.91.101.255";
-const VPS_PASSWORD = process.env.VPS_PASSWORD || "Veeridk1";
-const DB_URL = process.env.DATABASE_URL || "postgresql://postgres:vcp2CWFk91DO@localhost:5435/postgres";
+const VPS_IP = process.env.VPS_IP;
+const VPS_PASSWORD = process.env.VPS_PASSWORD;
+const DB_URL = process.env.DATABASE_URL;
+
+if (!VPS_IP || !VPS_PASSWORD || !DB_URL) {
+    console.error("❌ Missing required environment variables (VPS_IP, VPS_PASSWORD, DATABASE_URL)");
+    process.exit(1);
+}
 
 async function deploy() {
     console.log("Connecting to VPS...");
