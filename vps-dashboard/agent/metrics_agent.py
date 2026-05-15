@@ -87,31 +87,14 @@ def top_processes():
         return {"top_process_name": "", "top_process_ram_mb": 0, "top_processes": []}
 
 
-def docker_info():
+def docker_count():
     try:
         out = subprocess.check_output(
-            ["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}"],
-            text=True, stderr=subprocess.DEVNULL, timeout=10
+            ["docker", "ps", "-q"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-        containers = []
-        for line in out.splitlines():
-            if not line.strip():
-                continue
-            parts = line.split("|")
-            containers.append({
-                "name": parts[0] if len(parts) > 0 else "",
-                "cpu": float(parts[1].replace("%", "")) if len(parts) > 1 else 0,
-                "mem_usage": parts[2].strip() if len(parts) > 2 else "",
-                "mem_percent": float(parts[3].replace("%", "")) if len(parts) > 3 else 0,
-            })
-        return {"docker_container_count": len(containers), "docker_containers": containers}
+        return len([l for l in out.splitlines() if l.strip()])
     except Exception:
-        try:
-            out = subprocess.check_output(["docker", "ps", "-q"], text=True, stderr=subprocess.DEVNULL).strip()
-            count = len([l for l in out.splitlines() if l.strip()])
-            return {"docker_container_count": count, "docker_containers": []}
-        except Exception:
-            return {"docker_container_count": 0, "docker_containers": []}
+        return 0
 
 
 def collect_metrics():
@@ -129,7 +112,7 @@ def collect_metrics():
         **load,
         "uptime_seconds": uptime,
         **top,
-        **docker_info(),
+        "docker_container_count": docker_count(),
         "cpu_cores": cores,
     }
 

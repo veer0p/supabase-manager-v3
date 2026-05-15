@@ -2,7 +2,7 @@ import { motion, AnimatePresence, animate, useMotionValue, useTransform } from '
 import {
   Server, AlertTriangle, Activity, Cpu, HardDrive,
   MemoryStick, Zap, TrendingUp, Clock, Package,
-  RefreshCw, Settings2, Container
+  RefreshCw, Settings2, ListOrdered
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -748,124 +748,65 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
         </section>
       )}
 
-      {isReady && (liveData?.top_processes?.length > 0 || liveData?.docker_containers?.length > 0) && (
+      {isReady && liveData?.top_processes?.length > 0 && (
         <section className="space-y-6">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {/* Top Processes */}
-            {liveData?.top_processes?.length > 0 && (
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="w-1.5 h-8 bg-purple-500 rounded-r shadow-[0_0_12px_#8b5cf6]" />
-                  <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Top Processes</h2>
-                </div>
-                <div className="glass rounded-2xl border border-white/5 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-white/5">
-                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">#</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Process</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
-                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest w-1/4"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {liveData.top_processes.map((proc, i) => {
-                        const maxMem = liveData.top_processes[0]?.ram_mb || 1;
-                        const barPct = Math.min((proc.ram_mb / maxMem) * 100, 100);
-                        const barColor = i === 0 ? '#8b5cf6' : i < 3 ? '#3b82f6' : '#3ecf8e';
-                        return (
-                          <tr key={proc.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-                            <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{i + 1}</td>
-                            <td className="px-4 py-2.5">
-                              <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: barColor, boxShadow: `0 0 6px ${barColor}` }} />
-                                <span className="text-white font-mono font-semibold text-xs">{proc.name}</span>
-                                {proc.count > 1 && <span className="text-[9px] text-gray-600 font-mono">x{proc.count}</span>}
-                              </div>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <span className={`font-mono font-bold text-xs ${proc.cpu > 100 ? 'text-red-400' : proc.cpu > 50 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(proc.cpu, 1)}%</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <span className="text-white font-mono font-bold text-xs">{proc.ram_mb >= 1024 ? `${(proc.ram_mb / 1024).toFixed(1)}G` : `${proc.ram_mb}M`}</span>
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${barPct}%` }}
-                                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                                  className="h-full rounded-full"
-                                  style={{ backgroundColor: barColor, boxShadow: `0 0 8px ${barColor}40` }}
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-8 bg-purple-500 rounded-r shadow-[0_0_12px_#8b5cf6]" />
+            <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Top Processes</h2>
+          </div>
 
-            {/* Docker Containers */}
-            {liveData?.docker_containers?.length > 0 && (
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="w-1.5 h-8 bg-blue-500 rounded-r shadow-[0_0_12px_#3b82f6]" />
-                  <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Docker Containers</h2>
-                  <span className="text-[10px] font-orbitron font-bold text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded-lg">{liveData.docker_containers.length}</span>
-                </div>
-                <div className="glass rounded-2xl border border-white/5 overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-white/5">
-                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Container</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
-                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Mem %</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {liveData.docker_containers
-                        .sort((a, b) => b.cpu - a.cpu)
-                        .map((c) => (
-                        <tr key={c.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Container size={12} className="text-blue-400 shrink-0" />
-                              <span className="text-white font-mono font-semibold text-xs truncate max-w-[200px]" title={c.name}>{c.name}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2.5 text-right">
-                            <span className={`font-mono font-bold text-xs ${c.cpu > 50 ? 'text-red-400' : c.cpu > 20 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(c.cpu, 1)}%</span>
-                          </td>
-                          <td className="px-4 py-2.5 text-right">
-                            <span className="text-gray-300 font-mono text-xs">{c.mem_usage}</span>
-                          </td>
-                          <td className="px-4 py-2.5 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <div className="w-16 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${Math.min(c.mem_percent, 100)}%` }}
-                                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                                  className="h-full rounded-full"
-                                  style={{ backgroundColor: c.mem_percent > 80 ? '#ef4444' : c.mem_percent > 50 ? '#f59e0b' : '#3b82f6' }}
-                                />
-                              </div>
-                              <span className="text-[10px] text-gray-500 font-mono w-8 text-right">{fmt(c.mem_percent, 0)}%</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+          <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">#</th>
+                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Process</th>
+                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Instances</th>
+                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
+                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
+                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest w-1/4">Mem Usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveData.top_processes.map((proc, i) => {
+                  const maxMem = liveData.top_processes[0]?.ram_mb || 1;
+                  const barPct = Math.min((proc.ram_mb / maxMem) * 100, 100);
+                  const barColor = i === 0 ? '#8b5cf6' : i < 3 ? '#3b82f6' : '#3ecf8e';
+                  return (
+                    <tr key={proc.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                      <td className="px-6 py-3 text-gray-600 font-mono text-xs">{i + 1}</td>
+                      <td className="px-6 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: barColor, boxShadow: `0 0 6px ${barColor}` }} />
+                          <span className="text-white font-mono font-semibold text-sm">{proc.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-3 text-right text-gray-400 font-mono text-xs">{proc.count}</td>
+                      <td className="px-6 py-3 text-right">
+                        <span className={`font-mono font-bold text-sm ${proc.cpu > 100 ? 'text-red-400' : proc.cpu > 50 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(proc.cpu, 1)}%</span>
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <span className="text-white font-mono font-bold text-sm">{proc.ram_mb >= 1024 ? `${(proc.ram_mb / 1024).toFixed(1)} GB` : `${proc.ram_mb} MB`}</span>
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${barPct}%` }}
+                              transition={{ duration: 0.8, ease: 'easeOut' }}
+                              className="h-full rounded-full"
+                              style={{ backgroundColor: barColor, boxShadow: `0 0 8px ${barColor}40` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-500 font-mono w-10 text-right">{fmt(barPct, 0)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
       )}

@@ -57,20 +57,11 @@ def top_processes():
         return {"top_process_name": top["name"], "top_process_ram_mb": top["ram_mb"], "top_processes": procs}
     except: return {"top_process_name": "", "top_process_ram_mb": 0, "top_processes": []}
 
-def docker_info():
+def docker_count():
     try:
-        out = subprocess.check_output(["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}"], text=True, stderr=subprocess.DEVNULL, timeout=10).strip()
-        containers = []
-        for line in out.splitlines():
-            if not line.strip(): continue
-            p = line.split("|")
-            containers.append({"name": p[0] if len(p)>0 else "", "cpu": float(p[1].replace("%","")) if len(p)>1 else 0, "mem_usage": p[2].strip() if len(p)>2 else "", "mem_percent": float(p[3].replace("%","")) if len(p)>3 else 0})
-        return {"docker_container_count": len(containers), "docker_containers": containers}
-    except:
-        try:
-            out = subprocess.check_output(["docker", "ps", "-q"], text=True, stderr=subprocess.DEVNULL).strip()
-            return {"docker_container_count": len([l for l in out.splitlines() if l.strip()]), "docker_containers": []}
-        except: return {"docker_container_count": 0, "docker_containers": []}
+        out = subprocess.check_output(["docker", "ps", "-q"], text=True, stderr=subprocess.DEVNULL).strip()
+        return len([l for l in out.splitlines() if l.strip()])
+    except: return 0
 
 def collect_metrics():
     cpu = cpu_percent()
@@ -80,14 +71,14 @@ def collect_metrics():
     top = top_processes()
     uptime = int(float(open("/proc/uptime").read().split()[0]))
     cores = os.cpu_count() or 2
-    return {"cpu": cpu, **ram, **disk, **load, "uptime_seconds": uptime, **top, **docker_info(), "cpu_cores": cores}
+    return {"cpu": cpu, **ram, **disk, **load, "uptime_seconds": uptime, **top, "docker_container_count": docker_count(), "cpu_cores": cores}
 
 class MetricsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/metrics":
             self.send_response(404); self.end_headers(); self.wfile.write(b'{"error":"Not found"}'); return
         auth = self.headers.get("Authorization", "")
-        if auth != f"Bearer {TOKEN}":
+        if auth != "Bearer " + TOKEN:
             self.send_response(401); self.end_headers(); self.wfile.write(b'{"error":"Unauthorized"}'); return
         try:
             data = collect_metrics()
@@ -99,7 +90,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", PORT), MetricsHandler)
-    print(f"VPS Metrics Agent running on port {PORT}")
+    print("VPS Metrics Agent running on port " + str(PORT))
     server.serve_forever()
 `;
 
@@ -109,6 +100,14 @@ INSTALL_DIR="/opt/vps-metrics"
 SERVICE_NAME="vps-metrics"
 PORT=9100
 
+# Clean up any existing agent
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+rm -f /etc/systemd/system/\${SERVICE_NAME}.service
+rm -rf "$INSTALL_DIR"
+systemctl daemon-reload 2>/dev/null || true
+
+# Fresh install
 mkdir -p "$INSTALL_DIR"
 
 # Write the agent script
@@ -117,14 +116,10 @@ ${AGENT_SCRIPT}
 PYEOF
 chmod +x "$INSTALL_DIR/metrics_agent.py"
 
-# Generate token if not exists
-if [ ! -f "$INSTALL_DIR/.token" ]; then
-    TOKEN=$(openssl rand -hex 32)
-    echo "$TOKEN" > "$INSTALL_DIR/.token"
-    chmod 600 "$INSTALL_DIR/.token"
-else
-    TOKEN=$(cat "$INSTALL_DIR/.token")
-fi
+# Generate fresh token
+TOKEN=$(openssl rand -hex 32)
+echo "$TOKEN" > "$INSTALL_DIR/.token"
+chmod 600 "$INSTALL_DIR/.token"
 
 # Create systemd service
 cat > /etc/systemd/system/\${SERVICE_NAME}.service << SVCEOF
@@ -210,27 +205,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Step 1: Check if agent is already installed and get token
-    let token = null;
-    try {
-      const check = await sshExec(ip, password, 'cat /opt/vps-metrics/.token 2>/dev/null && systemctl is-active vps-metrics 2>/dev/null', 10000);
-      const lines = check.stdout.trim().split('\n');
-      if (lines.length >= 2 && lines[1] === 'active') {
-        token = lines[0].trim();
-      }
-    } catch {
-      // Agent not installed, proceed to install
+    // Always do a fresh install (removes old agent first)
+    const result = await sshExec(ip, password, INSTALL_COMMANDS, 30000);
+    const tokenLine = result.stdout.split('\n').find(l => l.startsWith('AGENT_TOKEN='));
+    if (!tokenLine) {
+      return res.status(500).json({ error: 'Agent installed but could not retrieve token' });
     }
-
-    // Step 2: Install agent if not found
-    if (!token) {
-      const result = await sshExec(ip, password, INSTALL_COMMANDS, 30000);
-      const tokenLine = result.stdout.split('\n').find(l => l.startsWith('AGENT_TOKEN='));
-      if (!tokenLine) {
-        return res.status(500).json({ error: 'Agent installed but could not retrieve token' });
-      }
-      token = tokenLine.split('=')[1].trim();
-    }
+    const token = tokenLine.split('=')[1].trim();
 
     // Step 3: Verify agent responds
     let verified = false;

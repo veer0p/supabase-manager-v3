@@ -85,32 +85,12 @@ function getTopProcesses() {
   }
 }
 
-function getDockerContainers() {
+function getDockerCount() {
   try {
-    const output = execSync(
-      'docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.Status}}"',
-      { encoding: 'utf8', timeout: 10000 }
-    );
-    const containers = output.trim().split('\n').filter(Boolean).map(line => {
-      const [name, cpuStr, memUsage, memPctStr, status] = line.split('|');
-      return {
-        name: name || '',
-        cpu: parseFloat(cpuStr) || 0,
-        mem_usage: memUsage?.trim() || '',
-        mem_percent: parseFloat(memPctStr) || 0,
-        status: status?.trim() || 'running',
-      };
-    });
-    return { docker_container_count: containers.length, docker_containers: containers };
+    const output = execSync('docker ps -q', { encoding: 'utf8', timeout: 3000 });
+    return output.trim().split('\n').filter(l => l.trim()).length;
   } catch {
-    // Fallback: just count
-    try {
-      const output = execSync('docker ps -q', { encoding: 'utf8', timeout: 3000 });
-      const count = output.trim().split('\n').filter(l => l.trim()).length;
-      return { docker_container_count: count, docker_containers: [] };
-    } catch {
-      return { docker_container_count: 0, docker_containers: [] };
-    }
+    return 0;
   }
 }
 
@@ -141,7 +121,7 @@ function getMetrics() {
     load_avg_15m: load15,
     uptime_seconds: Math.floor(os.uptime()),
     ...top,
-    ...getDockerContainers(),
+    docker_container_count: getDockerCount(),
     cpu_cores: os.cpus().length,
   };
 }
