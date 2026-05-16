@@ -19,7 +19,7 @@ export default async function handler(req, res) {
 
   try {
     const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${token}`, 'Connection': 'close' },
       signal: controller.signal,
     });
     clearTimeout(timeout);

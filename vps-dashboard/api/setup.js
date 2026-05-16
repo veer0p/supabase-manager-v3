@@ -2,21 +2,97 @@ import { Client } from 'ssh2';
 
 // The metrics agent Python script — embedded inline for auto-install
 const AGENT_SCRIPT = `#!/usr/bin/env python3
-import os, json, time, subprocess
+import os, json, time, subprocess, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = os.environ.get("METRICS_TOKEN") or open("/opt/vps-metrics/.token").read().strip()
 PORT = int(os.environ.get("METRICS_PORT", 9100))
 
-def cpu_percent():
-    def read():
-        return list(map(int, open("/proc/stat").readline().split()[1:]))
-    a = read()
-    time.sleep(0.5)
-    b = read()
-    idle = b[3] - a[3]
-    total = sum(b) - sum(a)
-    return round((1 - idle / total) * 100, 1) if total else 0
+# --- Background cache for expensive commands ---
+_cache = {
+    "cpu": 0,
+    "top_processes": [], "top_process_name": "", "top_process_ram_mb": 0,
+    "docker_container_count": 0, "docker_containers": [],
+}
+_lock = threading.Lock()
+
+def _bg_cpu():
+    while True:
+        try:
+            def read():
+                return list(map(int, open("/proc/stat").readline().split()[1:]))
+            a = read()
+            time.sleep(1)
+            b = read()
+            idle = b[3] - a[3]
+            total = sum(b) - sum(a)
+            val = round((1 - idle / total) * 100, 1) if total else 0
+            with _lock:
+                _cache["cpu"] = val
+        except:
+            pass
+        time.sleep(1)
+
+def _bg_processes():
+    while True:
+        try:
+            out = subprocess.check_output(["ps", "aux", "--sort=-%mem"], text=True, timeout=10).splitlines()
+            seen = {}
+            for line in out[1:51]:
+                f = line.split()
+                if len(f) > 10:
+                    name = os.path.basename(f[10])
+                    mem = int(f[5]) // 1024 if len(f) > 5 else 0
+                    cpu = float(f[2]) if len(f) > 2 else 0
+                    if name in seen: seen[name]["ram_mb"] += mem; seen[name]["cpu"] += cpu; seen[name]["count"] += 1
+                    else: seen[name] = {"name": name, "ram_mb": mem, "cpu": round(cpu, 1), "count": 1}
+            procs = sorted(seen.values(), key=lambda x: x["ram_mb"], reverse=True)[:10]
+            top = procs[0] if procs else {"name": "", "ram_mb": 0}
+            with _lock:
+                _cache["top_processes"] = procs
+                _cache["top_process_name"] = top["name"]
+                _cache["top_process_ram_mb"] = top["ram_mb"]
+        except:
+            pass
+        time.sleep(3)
+
+def _bg_docker():
+    while True:
+        try:
+            out = subprocess.check_output(["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}"], text=True, stderr=subprocess.DEVNULL, timeout=30).strip()
+            containers = []
+            for line in out.splitlines():
+                if not line.strip(): continue
+                parts = line.split("|")
+                name = parts[0] if len(parts) > 0 else ""
+                cpu_str = parts[1].replace("%","").strip() if len(parts) > 1 else "0"
+                mem_usage = parts[2].strip() if len(parts) > 2 else ""
+                mem_pct_str = parts[3].replace("%","").strip() if len(parts) > 3 else "0"
+                try: cpu_val = float(cpu_str)
+                except: cpu_val = 0
+                try: mem_pct = float(mem_pct_str)
+                except: mem_pct = 0
+                mem_mb = 0
+                if mem_usage:
+                    used_part = mem_usage.split("/")[0].strip()
+                    if "GiB" in used_part: mem_mb = int(float(used_part.replace("GiB","").strip()) * 1024)
+                    elif "MiB" in used_part: mem_mb = int(float(used_part.replace("MiB","").strip()))
+                    elif "KiB" in used_part: mem_mb = max(1, int(float(used_part.replace("KiB","").strip()) / 1024))
+                containers.append({"name": name, "cpu": round(cpu_val, 1), "ram_mb": mem_mb, "mem_percent": round(mem_pct, 1)})
+            containers.sort(key=lambda x: x["ram_mb"], reverse=True)
+            with _lock:
+                _cache["docker_container_count"] = len(containers)
+                _cache["docker_containers"] = containers
+        except:
+            pass
+        time.sleep(5)
+
+# Start background collectors
+for fn in [_bg_cpu, _bg_processes, _bg_docker]:
+    t = threading.Thread(target=fn, daemon=True)
+    t.start()
+
+# --- Fast metric reads (no subprocess calls) ---
 
 def ram_info():
     m = {}
@@ -40,38 +116,19 @@ def load_info():
     parts = open("/proc/loadavg").read().split()[:3]
     return {"load_avg_1m": float(parts[0]), "load_avg_5m": float(parts[1]), "load_avg_15m": float(parts[2])}
 
-def top_processes():
-    try:
-        out = subprocess.check_output(["ps", "aux", "--sort=-%mem"], text=True).splitlines()
-        seen = {}
-        for line in out[1:51]:
-            f = line.split()
-            if len(f) > 10:
-                name = os.path.basename(f[10])
-                mem = int(f[5]) // 1024 if len(f) > 5 else 0
-                cpu = float(f[2]) if len(f) > 2 else 0
-                if name in seen: seen[name]["ram_mb"] += mem; seen[name]["cpu"] += cpu; seen[name]["count"] += 1
-                else: seen[name] = {"name": name, "ram_mb": mem, "cpu": round(cpu, 1), "count": 1}
-        procs = sorted(seen.values(), key=lambda x: x["ram_mb"], reverse=True)[:10]
-        top = procs[0] if procs else {"name": "", "ram_mb": 0}
-        return {"top_process_name": top["name"], "top_process_ram_mb": top["ram_mb"], "top_processes": procs}
-    except: return {"top_process_name": "", "top_process_ram_mb": 0, "top_processes": []}
-
-def docker_count():
-    try:
-        out = subprocess.check_output(["docker", "ps", "-q"], text=True, stderr=subprocess.DEVNULL).strip()
-        return len([l for l in out.splitlines() if l.strip()])
-    except: return 0
-
 def collect_metrics():
-    cpu = cpu_percent()
     ram = ram_info()
     disk = disk_info()
     load = load_info()
-    top = top_processes()
     uptime = int(float(open("/proc/uptime").read().split()[0]))
     cores = os.cpu_count() or 2
-    return {"cpu": cpu, **ram, **disk, **load, "uptime_seconds": uptime, **top, "docker_container_count": docker_count(), "cpu_cores": cores}
+    with _lock:
+        cached = dict(_cache)
+    return {"cpu": cached["cpu"], **ram, **disk, **load, "uptime_seconds": uptime,
+            "top_process_name": cached["top_process_name"], "top_process_ram_mb": cached["top_process_ram_mb"],
+            "top_processes": cached["top_processes"],
+            "docker_container_count": cached["docker_container_count"], "docker_containers": cached["docker_containers"],
+            "cpu_cores": cores}
 
 class MetricsHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -110,10 +167,8 @@ systemctl daemon-reload 2>/dev/null || true
 # Fresh install
 mkdir -p "$INSTALL_DIR"
 
-# Write the agent script
-cat > "$INSTALL_DIR/metrics_agent.py" << 'PYEOF'
-${AGENT_SCRIPT}
-PYEOF
+# Write the agent script (base64 encoded to avoid shell escaping issues)
+echo "__AGENT_B64__" | base64 -d > "$INSTALL_DIR/metrics_agent.py"
 chmod +x "$INSTALL_DIR/metrics_agent.py"
 
 # Generate fresh token
@@ -146,6 +201,13 @@ systemctl restart "$SERVICE_NAME"
 # Open firewall
 if command -v ufw &> /dev/null; then
     ufw allow \${PORT}/tcp 2>/dev/null || true
+fi
+
+# Verify the deployed script has docker_info
+if grep -q "docker_info" "$INSTALL_DIR/metrics_agent.py"; then
+  echo "DEPLOY_CHECK=docker_info_found"
+else
+  echo "DEPLOY_CHECK=docker_info_MISSING"
 fi
 
 # Output the token for capture
@@ -205,26 +267,44 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Encode agent script as base64 to avoid heredoc/shell escaping issues
+    const agentB64 = Buffer.from(AGENT_SCRIPT).toString('base64');
+    const installCmd = INSTALL_COMMANDS.replace('__AGENT_B64__', agentB64);
+
     // Always do a fresh install (removes old agent first)
-    const result = await sshExec(ip, password, INSTALL_COMMANDS, 30000);
+    const result = await sshExec(ip, password, installCmd, 60000);
     const tokenLine = result.stdout.split('\n').find(l => l.startsWith('AGENT_TOKEN='));
     if (!tokenLine) {
       return res.status(500).json({ error: 'Agent installed but could not retrieve token' });
     }
     const token = tokenLine.split('=')[1].trim();
 
-    // Step 3: Verify agent responds
+    // Log deploy check
+    const deployCheck = result.stdout.split('\n').find(l => l.startsWith('DEPLOY_CHECK='));
+    console.log('[setup] Deploy check:', deployCheck || 'not found');
+    console.log('[setup] stdout:', result.stdout.slice(-300));
+
+    // Step 3: Verify agent responds (via HTTP, not SSH)
     let verified = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const verifyResult = await sshExec(ip, password, `curl -sf -H "Authorization: Bearer ${token}" http://localhost:9100/metrics`, 5000);
-        if (verifyResult.stdout.includes('"cpu"')) {
-          verified = true;
-          break;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const verifyRes = await fetch(`http://${ip}:9100/metrics`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (verifyRes.ok) {
+          const data = await verifyRes.json();
+          if (data.cpu !== undefined) {
+            verified = true;
+            break;
+          }
         }
       } catch {
         // Agent might be starting up, wait a moment
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1500));
       }
     }
 

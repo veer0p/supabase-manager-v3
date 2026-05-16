@@ -2,7 +2,8 @@ import { motion, AnimatePresence, animate, useMotionValue, useTransform } from '
 import {
   Server, AlertTriangle, Activity, Cpu, HardDrive,
   MemoryStick, Zap, TrendingUp, Clock, Package,
-  RefreshCw, Settings2, ListOrdered
+  RefreshCw, Settings2, ListOrdered, WifiOff,
+  ChevronLeft, ChevronRight, Container, Layers
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -365,6 +366,73 @@ function PressureGauge({ load1m, load5m, load15m, cpuCores = 2 }) {
   );
 }
 
+// ----------- Offline Banner -----------
+
+function OfflineBanner({ ip, onChangeCredentials }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+    >
+      <div className="glass rounded-3xl border border-red-500/30 p-10 max-w-md w-full mx-4 text-center shadow-2xl">
+        <motion.div
+          animate={{ scale: [1, 1.1, 1] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="inline-flex p-4 rounded-full bg-red-500/10 border border-red-500/20 mb-6"
+        >
+          <WifiOff size={40} className="text-red-400" />
+        </motion.div>
+        <h2 className="text-2xl font-orbitron font-bold text-white mb-3">VPS Offline</h2>
+        <p className="text-gray-400 text-sm mb-2">Unable to reach <span className="text-white font-mono">{ip}</span></p>
+        <p className="text-gray-500 text-xs mb-8">The metrics agent is not responding. The VPS may be down or port 9100 is blocked.</p>
+        <div className="flex gap-3 justify-center">
+          <motion.div
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl"
+          >
+            <RefreshCw size={14} className="text-amber-400 animate-spin" style={{ animationDuration: '3s' }} />
+            <span className="text-amber-400 text-xs font-bold">Reconnecting...</span>
+          </motion.div>
+          <button
+            onClick={onChangeCredentials}
+            className="px-4 py-2 text-xs font-bold text-white bg-white/10 border border-white/20 rounded-xl hover:bg-white/20 transition-all"
+          >
+            Change VPS
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ----------- Pagination Component -----------
+
+function Pagination({ currentPage, totalPages, onPageChange }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => onPageChange(currentPage - 1)}
+        disabled={currentPage <= 1}
+        className="p-1.5 rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        <ChevronLeft size={14} className="text-gray-400" />
+      </button>
+      <span className="text-[10px] font-orbitron font-bold text-gray-500 tracking-wider px-2">
+        {currentPage} / {totalPages}
+      </span>
+      <button
+        onClick={() => onPageChange(currentPage + 1)}
+        disabled={currentPage >= totalPages}
+        className="p-1.5 rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+      >
+        <ChevronRight size={14} className="text-gray-400" />
+      </button>
+    </div>
+  );
+}
+
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0]?.payload;
@@ -392,6 +460,7 @@ const PeriodBtn = ({ label, active, onClick }) => (
 // ----------- Main Page -----------
 
 const MAX_HISTORY = 43200; // ~24h at 2s intervals
+const ITEMS_PER_PAGE = 5;
 
 export default function Overview({ ip, token, onError, onChangeCredentials }) {
   const [liveData, setLiveData] = useState(null);
@@ -400,8 +469,12 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
   const [minLoadingDone, setMinLoadingDone] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState('cpu');
   const [selectedPeriod, setSelectedPeriod] = useState('all');
+  const [processPage, setProcessPage] = useState(1);
+  const [dockerPage, setDockerPage] = useState(1);
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
 
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
@@ -411,7 +484,7 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
 
   // Client-side alerts computed from live data
   const alerts = [];
-  if (liveData) {
+  if (liveData && isOnline) {
     if (liveData.cpu > 85) alerts.push({ type: 'cpu', message: `CPU at ${fmt(liveData.cpu)}%` });
     if (liveData.ram_percent > 90) alerts.push({ type: 'ram', message: `RAM at ${fmt(liveData.ram_percent)}%` });
     if (liveData.disk_percent > 90) alerts.push({ type: 'disk', message: `Disk at ${fmt(liveData.disk_percent)}%` });
@@ -456,6 +529,8 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
 
           setLiveData(data);
           setIsOnline(true);
+          setHasConnectedOnce(true);
+          setConsecutiveFailures(0);
           setLastUpdated(new Date());
           setLiveLoading(false);
 
@@ -478,7 +553,11 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
 
         } catch (err) {
           if (!mountedRef.current) break;
-          setIsOnline(false);
+          setConsecutiveFailures(prev => prev + 1);
+          // Mark offline after 3 consecutive failures
+          if (consecutiveFailures >= 2) {
+            setIsOnline(false);
+          }
           setLiveLoading(false);
           if (onError) onError(err.message);
         }
@@ -496,9 +575,39 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
     };
   }, [ip, token, onError, computeSummary]);
 
-  const cpuThresh = getThreshold(liveData?.cpu || 0);
-  const ramThresh = getThreshold(liveData?.ram_percent || 0);
-  const diskThresh = getThreshold(liveData?.disk_percent || 0, 75, 90);
+  // Safe data accessors - show 0 when offline
+  const safeData = isOnline && liveData ? liveData : {
+    cpu: 0, ram_percent: 0, ram_used_mb: 0, ram_total_mb: 0,
+    disk_percent: 0, disk_used_gb: 0, disk_total_gb: 0,
+    load_avg_1m: 0, load_avg_5m: 0, load_avg_15m: 0,
+    uptime_seconds: 0, cpu_cores: 0, docker_container_count: 0,
+    docker_containers: [], top_processes: [],
+    top_process_name: '', top_process_ram_mb: 0,
+  };
+
+  const cpuThresh = getThreshold(safeData.cpu);
+  const ramThresh = getThreshold(safeData.ram_percent);
+  const diskThresh = getThreshold(safeData.disk_percent, 75, 90);
+
+  // Pagination for processes
+  const allProcesses = safeData.top_processes || [];
+  const totalProcessPages = Math.max(1, Math.ceil(allProcesses.length / ITEMS_PER_PAGE));
+  const paginatedProcesses = allProcesses.slice((processPage - 1) * ITEMS_PER_PAGE, processPage * ITEMS_PER_PAGE);
+
+  // Normalize docker containers — handle both old format (image/status/ports) and new format (cpu/ram_mb/mem_percent)
+  const allContainers = (safeData.docker_containers || []).map(c => ({
+    name: c.name || '',
+    cpu: c.cpu ?? 0,
+    ram_mb: c.ram_mb ?? 0,
+    mem_percent: c.mem_percent ?? 0,
+    // Old format fields used as fallback display
+    image: c.image || '',
+    status: c.status || '',
+  }));
+  const totalDockerPages = Math.max(1, Math.ceil(allContainers.length / ITEMS_PER_PAGE));
+  const paginatedContainers = allContainers.slice((dockerPage - 1) * ITEMS_PER_PAGE, dockerPage * ITEMS_PER_PAGE);
+  // Detect if agent returns new format (has cpu/ram_mb) or old format (has image/status)
+  const hasDockerStats = allContainers.length > 0 && allContainers.some(c => c.ram_mb > 0 || c.cpu > 0);
 
   // Filter history for display
   const getFilteredHistory = () => {
@@ -518,6 +627,13 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8 pb-10">
+      {/* Offline overlay - only show after initial connection succeeded then lost */}
+      <AnimatePresence>
+        {!isOnline && hasConnectedOnce && (
+          <OfflineBanner ip={ip} onChangeCredentials={onChangeCredentials} />
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold font-orbitron text-white uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400">Telemetry Overview</h1>
@@ -570,7 +686,7 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
               sub={ip}
               color={isOnline ? "#3ecf8e" : "#ef4444"} />
             <ApexStatCard icon={Package} label="Containers"
-              value={liveData?.docker_container_count || 0}
+              value={safeData.docker_container_count}
               sub="Docker active"
               color="#3b82f6" />
             <ApexStatCard icon={AlertTriangle} label="System Alerts"
@@ -578,9 +694,9 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
               sub={alerts.length === 0 ? "All systems healthy" : "Requires attention"}
               color={alerts.length > 0 ? "#ef4444" : "#3ecf8e"} />
             <ApexStatCard icon={Cpu} label="Current CPU"
-              value={liveData ? `${fmt(liveData.cpu)}%` : '—'}
-              sub={liveData ? `Load: ${fmt(liveData.load_avg_1m, 2)}` : 'Connecting...'}
-              color={cpuThresh.color} loading={liveLoading} animate />
+              value={`${fmt(safeData.cpu)}%`}
+              sub={`Load: ${fmt(safeData.load_avg_1m, 2)}`}
+              color={cpuThresh.color} loading={liveLoading} animate={isOnline} />
           </>
         )}
       </div>
@@ -600,12 +716,12 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
                 <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">CPU USAGE</span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-[11px] font-orbitron font-bold" style={{ color: cpuThresh.color }}>{fmt(liveData?.cpu || 0)}%</span>
+                <span className="text-[11px] font-orbitron font-bold" style={{ color: cpuThresh.color }}>{fmt(safeData.cpu)}%</span>
                 <span className="text-[8px] text-gray-500 font-mono uppercase tracking-tighter">Usage</span>
               </div>
             </div>
             <div className="relative h-44 flex items-center justify-center">
-              <Tachometer value={liveData?.cpu || 0} color={cpuThresh.color} />
+              <Tachometer value={safeData.cpu} color={cpuThresh.color} />
             </div>
           </motion.div>
 
@@ -617,15 +733,15 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
                 <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">RAM USAGE</span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-[11px] font-orbitron font-bold" style={{ color: ramThresh.color }}>{fmt(liveData?.ram_percent || 0)}%</span>
-                <span className="text-[8px] text-gray-500 font-mono uppercase tracking-tighter">{liveData?.ram_used_mb || 0} MB</span>
+                <span className="text-[11px] font-orbitron font-bold" style={{ color: ramThresh.color }}>{fmt(safeData.ram_percent)}%</span>
+                <span className="text-[8px] text-gray-500 font-mono uppercase tracking-tighter">{safeData.ram_used_mb} MB</span>
               </div>
             </div>
             <div className="relative h-44 flex items-center justify-center">
               <FuelGauge
-                percent={liveData?.ram_percent || 0}
-                used={liveData?.ram_used_mb || 0}
-                total={liveData?.ram_total_mb || 1024}
+                percent={safeData.ram_percent}
+                used={safeData.ram_used_mb}
+                total={safeData.ram_total_mb || 1024}
                 color={ramThresh.color}
               />
             </div>
@@ -642,7 +758,7 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
               </span>
             </div>
             <div className="flex-1 flex items-center justify-center">
-              <Odometer usedGb={liveData?.disk_used_gb || 0} totalGb={Math.round(liveData?.disk_total_gb || 0)} color={diskThresh.color} />
+              <Odometer usedGb={safeData.disk_used_gb} totalGb={Math.round(safeData.disk_total_gb)} color={diskThresh.color} />
             </div>
             <p className="text-[9px] text-center text-gray-600 mt-4 uppercase tracking-[0.2em] font-bold">Storage Status</p>
           </motion.div>
@@ -654,14 +770,14 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
                 <Zap size={20} className="text-blue-400" />
                 <span className="font-black font-orbitron tracking-[0.15em] text-[11px] text-white">LOAD AVG</span>
               </div>
-              <span className="text-[9px] text-blue-400 font-black uppercase tracking-tighter bg-blue-400/10 px-2 py-0.5 rounded-lg border border-blue-400/20">{liveData?.cpu_cores || 2} CORES</span>
+              <span className="text-[9px] text-blue-400 font-black uppercase tracking-tighter bg-blue-400/10 px-2 py-0.5 rounded-lg border border-blue-400/20">{safeData.cpu_cores} CORES</span>
             </div>
             <div className="relative h-44 flex items-center justify-center">
               <PressureGauge
-                load1m={liveData?.load_avg_1m || 0}
-                load5m={liveData?.load_avg_5m || 0}
-                load15m={liveData?.load_avg_15m || 0}
-                cpuCores={liveData?.cpu_cores || 2}
+                load1m={safeData.load_avg_1m}
+                load5m={safeData.load_avg_5m}
+                load15m={safeData.load_avg_15m}
+                cpuCores={safeData.cpu_cores || 2}
               />
             </div>
           </motion.div>
@@ -705,9 +821,9 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
               <div className="p-3 border border-[#3ecf8e20] bg-[#3ecf8e10] rounded-2xl shadow-[inset_0_0_12px_rgba(62,207,142,0.2)]"><Clock size={22} className="text-[#3ecf8e]" /></div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">Runtime</p>
-                <p className="text-white font-mono font-black text-sm tracking-tight">{formatUptime(liveData?.uptime_seconds || 0)}</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{formatUptime(safeData.uptime_seconds)}</p>
                 <div className="mt-3 px-3 py-1 bg-[#3ecf8e10] rounded-full border border-[#3ecf8e20]">
-                  <span className="text-[11px] text-[#3ecf8e] font-bold uppercase tracking-widest">STABLE</span>
+                  <span className="text-[11px] text-[#3ecf8e] font-bold uppercase tracking-widest">{isOnline ? 'STABLE' : 'OFFLINE'}</span>
                 </div>
               </div>
             </motion.div>
@@ -716,7 +832,7 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
               <div className="p-3 border border-blue-500/20 bg-blue-500/10 rounded-2xl shadow-[inset_0_0_12px_rgba(59,130,246,0.2)]"><Package size={22} className="text-blue-400" /></div>
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-2">Containers</p>
-                <p className="text-white font-mono font-black text-sm tracking-tight">{liveData?.docker_container_count || 0} ACTIVE</p>
+                <p className="text-white font-mono font-black text-sm tracking-tight">{safeData.docker_container_count} ACTIVE</p>
                 <div className="mt-3 px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
                   <span className="text-[11px] text-blue-400 font-bold uppercase tracking-widest">DOCKER</span>
                 </div>
@@ -748,65 +864,186 @@ export default function Overview({ ip, token, onError, onChangeCredentials }) {
         </section>
       )}
 
-      {isReady && liveData?.top_processes?.length > 0 && (
+      {/* Top Processes & Docker Containers - Side by Side */}
+      {isReady && (
         <section className="space-y-6">
-          <div className="flex items-center gap-3">
-            <span className="w-1.5 h-8 bg-purple-500 rounded-r shadow-[0_0_12px_#8b5cf6]" />
-            <h2 className="text-xl font-orbitron font-bold text-white tracking-[0.2em] uppercase">Top Processes</h2>
-          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* Top Processes Widget */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-1.5 h-8 bg-purple-500 rounded-r shadow-[0_0_12px_#8b5cf6]" />
+                  <h2 className="text-lg font-orbitron font-bold text-white tracking-[0.15em] uppercase">Top Processes</h2>
+                  <span className="text-[10px] font-orbitron text-gray-500 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                    {allProcesses.length}
+                  </span>
+                </div>
+                {totalProcessPages > 1 && (
+                  <Pagination currentPage={processPage} totalPages={totalProcessPages} onPageChange={setProcessPage} />
+                )}
+              </div>
 
-          <div className="glass rounded-2xl border border-white/5 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-white/5">
-                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">#</th>
-                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Process</th>
-                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Instances</th>
-                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
-                  <th className="text-right px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
-                  <th className="text-left px-6 py-4 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest w-1/4">Mem Usage</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveData.top_processes.map((proc, i) => {
-                  const maxMem = liveData.top_processes[0]?.ram_mb || 1;
-                  const barPct = Math.min((proc.ram_mb / maxMem) * 100, 100);
-                  const barColor = i === 0 ? '#8b5cf6' : i < 3 ? '#3b82f6' : '#3ecf8e';
-                  return (
-                    <tr key={proc.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-3 text-gray-600 font-mono text-xs">{i + 1}</td>
-                      <td className="px-6 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: barColor, boxShadow: `0 0 6px ${barColor}` }} />
-                          <span className="text-white font-mono font-semibold text-sm">{proc.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-3 text-right text-gray-400 font-mono text-xs">{proc.count}</td>
-                      <td className="px-6 py-3 text-right">
-                        <span className={`font-mono font-bold text-sm ${proc.cpu > 100 ? 'text-red-400' : proc.cpu > 50 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(proc.cpu, 1)}%</span>
-                      </td>
-                      <td className="px-6 py-3 text-right">
-                        <span className="text-white font-mono font-bold text-sm">{proc.ram_mb >= 1024 ? `${(proc.ram_mb / 1024).toFixed(1)} GB` : `${proc.ram_mb} MB`}</span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
-                            <motion.div
-                              initial={{ width: 0 }}
-                              animate={{ width: `${barPct}%` }}
-                              transition={{ duration: 0.8, ease: 'easeOut' }}
-                              className="h-full rounded-full"
-                              style={{ backgroundColor: barColor, boxShadow: `0 0 8px ${barColor}40` }}
-                            />
-                          </div>
-                          <span className="text-[10px] text-gray-500 font-mono w-10 text-right">{fmt(barPct, 0)}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+              <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+                {allProcesses.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <ListOrdered size={28} className="mx-auto mb-3 text-gray-600" />
+                    <p className="text-gray-500 text-sm">No process data available</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">#</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Process</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
+                        <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest w-1/4"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedProcesses.map((proc, i) => {
+                        const globalIndex = (processPage - 1) * ITEMS_PER_PAGE + i;
+                        const maxMem = allProcesses[0]?.ram_mb || 1;
+                        const barPct = Math.min((proc.ram_mb / maxMem) * 100, 100);
+                        const barColor = globalIndex === 0 ? '#8b5cf6' : globalIndex < 3 ? '#3b82f6' : '#3ecf8e';
+                        return (
+                          <tr key={proc.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-3 text-gray-600 font-mono text-xs">{globalIndex + 1}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: barColor, boxShadow: `0 0 6px ${barColor}` }} />
+                                <span className="text-white font-mono font-semibold text-xs truncate max-w-[120px]" title={proc.name}>{proc.name}</span>
+                                {proc.count > 1 && <span className="text-[9px] text-gray-500 bg-white/5 px-1.5 rounded">{proc.count}x</span>}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`font-mono font-bold text-xs ${proc.cpu > 100 ? 'text-red-400' : proc.cpu > 50 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(proc.cpu, 1)}%</span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className="text-white font-mono font-bold text-xs">{proc.ram_mb >= 1024 ? `${(proc.ram_mb / 1024).toFixed(1)}G` : `${proc.ram_mb}M`}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${barPct}%` }}
+                                  transition={{ duration: 0.8, ease: 'easeOut' }}
+                                  className="h-full rounded-full"
+                                  style={{ backgroundColor: barColor, boxShadow: `0 0 8px ${barColor}40` }}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            {/* Docker Containers Widget */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="w-1.5 h-8 bg-blue-500 rounded-r shadow-[0_0_12px_#3b82f6]" />
+                  <h2 className="text-lg font-orbitron font-bold text-white tracking-[0.15em] uppercase">Docker Containers</h2>
+                  <span className="text-[10px] font-orbitron text-gray-500 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                    {allContainers.length}
+                  </span>
+                </div>
+                {totalDockerPages > 1 && (
+                  <Pagination currentPage={dockerPage} totalPages={totalDockerPages} onPageChange={setDockerPage} />
+                )}
+              </div>
+
+              <div className="glass rounded-2xl border border-white/5 overflow-hidden">
+                {allContainers.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <Layers size={28} className="mx-auto mb-3 text-gray-600" />
+                    <p className="text-gray-500 text-sm">{isOnline ? 'No containers running' : 'No data available'}</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">#</th>
+                        <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Container</th>
+                        {hasDockerStats ? (
+                          <>
+                            <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">CPU</th>
+                            <th className="text-right px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Memory</th>
+                            <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest w-1/4"></th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Image</th>
+                            <th className="text-left px-4 py-3 text-[10px] font-orbitron font-bold text-gray-500 uppercase tracking-widest">Status</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedContainers.map((container, i) => {
+                        const globalIndex = (dockerPage - 1) * ITEMS_PER_PAGE + i;
+                        const barColor = globalIndex === 0 ? '#3b82f6' : globalIndex < 3 ? '#8b5cf6' : '#3ecf8e';
+                        const isUp = container.status?.toLowerCase().includes('up');
+                        const statusColor = isUp ? '#3ecf8e' : container.status ? '#ef4444' : '#555';
+                        return (
+                          <tr key={container.name + i} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-3 text-gray-600 font-mono text-xs">{globalIndex + 1}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hasDockerStats ? barColor : statusColor, boxShadow: `0 0 6px ${hasDockerStats ? barColor : statusColor}` }} />
+                                <span className="text-white font-mono font-semibold text-xs truncate max-w-[120px]" title={container.name}>{container.name}</span>
+                              </div>
+                            </td>
+                            {hasDockerStats ? (
+                              <>
+                                <td className="px-4 py-3 text-right">
+                                  <span className={`font-mono font-bold text-xs ${container.cpu > 100 ? 'text-red-400' : container.cpu > 50 ? 'text-amber-400' : 'text-gray-300'}`}>{fmt(container.cpu, 1)}%</span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className="text-white font-mono font-bold text-xs">{container.ram_mb >= 1024 ? `${(container.ram_mb / 1024).toFixed(1)}G` : `${container.ram_mb}M`}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${Math.min((container.ram_mb / (allContainers[0]?.ram_mb || 1)) * 100, 100)}%` }}
+                                      transition={{ duration: 0.8, ease: 'easeOut' }}
+                                      className="h-full rounded-full"
+                                      style={{ backgroundColor: barColor, boxShadow: `0 0 8px ${barColor}40` }}
+                                    />
+                                  </div>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="px-4 py-3">
+                                  <span className="text-gray-400 font-mono text-xs truncate block max-w-[140px]" title={container.image}>
+                                    {container.image?.split('/').pop()?.split(':')[0] || container.image}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full border" style={{
+                                    color: statusColor,
+                                    backgroundColor: `${statusColor}15`,
+                                    borderColor: `${statusColor}30`,
+                                  }}>
+                                    {container.status?.split(' ').slice(0, 3).join(' ') || 'Unknown'}
+                                  </span>
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       )}

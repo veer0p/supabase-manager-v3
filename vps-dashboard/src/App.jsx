@@ -5,26 +5,25 @@ import { setupAgent } from './lib/api';
 
 export default function App() {
   const [ip, setIp] = useState('');
-  const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
   const [showDialog, setShowDialog] = useState(false);
   const [error, setError] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
   const [connected, setConnected] = useState(false);
 
-  // Load saved credentials on mount
+  // Load saved connection on mount (only IP + token needed for monitoring)
   useEffect(() => {
     const savedIp = localStorage.getItem('vps_ip');
-    const savedPassword = localStorage.getItem('vps_password');
     const savedToken = localStorage.getItem('vps_agent_token');
-    if (savedIp && savedPassword && savedToken) {
+    if (savedIp && savedToken) {
       setIp(savedIp);
-      setPassword(savedPassword);
       setToken(savedToken);
       setConnected(true);
     } else {
       setShowDialog(true);
     }
+    // Clean up legacy stored password if present
+    localStorage.removeItem('vps_password');
   }, []);
 
   const handleConnect = async (newIp, newPassword) => {
@@ -32,12 +31,10 @@ export default function App() {
     setError('');
     try {
       const result = await setupAgent(newIp, newPassword);
-      // Save everything
+      // Save only what's needed for monitoring (not the SSH password)
       localStorage.setItem('vps_ip', newIp);
-      localStorage.setItem('vps_password', newPassword);
       localStorage.setItem('vps_agent_token', result.token);
       setIp(newIp);
-      setPassword(newPassword);
       setToken(result.token);
       setShowDialog(false);
       setConnected(true);
